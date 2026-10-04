@@ -6,6 +6,9 @@ with [MyGo](https://mygo.egoist.dev/)'s native UI. No webview, no JavaScript:
 the window is drawn by MyGo on the GPU, with the system's fonts, accent color,
 dark mode, menus and vibrancy.
 
+<img width="1222" height="844" alt="截屏 2026-10-05 at 00 12 00 (2)" src="https://github.com/user-attachments/assets/a665076b-af70-4c70-b487-fe93b70cfa71" />
+
+
 ## Features
 
 - **Review local changes**: staged, unstaged and untracked files against
