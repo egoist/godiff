@@ -1,0 +1,7 @@
+{
+  "name": "Godiff",
+  "identifier": "dev.egoist.godiff",
+  "version": "0.1.0",
+  "copyright": "© 2026 EGOIST",
+  "out": "build"
+}
