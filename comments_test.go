@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 
@@ -103,5 +104,53 @@ func TestSwitchSourceOnFilesTab(t *testing.T) {
 		if !f.loaded {
 			t.Errorf("%s not loaded", f.Path)
 		}
+	}
+}
+
+func TestSwitchSourceStartsAtTheTop(t *testing.T) {
+	dir := testRepo(t)
+	long := func(word string) string {
+		var b strings.Builder
+		for i := range 300 {
+			fmt.Fprintf(&b, "%s %d\n", word, i)
+		}
+		return b.String()
+	}
+	writeFile(t, dir, "a.txt", long("a"))
+	gitIn(t, dir, "add", ".")
+	gitIn(t, dir, "commit", "-q", "-m", "A")
+	writeFile(t, dir, "b.txt", long("b"))
+	gitIn(t, dir, "add", ".")
+	gitIn(t, dir, "commit", "-q", "-m", "B")
+	w, tt := newTestWindow(t, dir)
+	resolve := func(ref string) string {
+		hash, err := w.repo.Resolve(ref)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return hash
+	}
+	w.setSource(source{kind: sourceCommit, ref: resolve("HEAD")})
+	tt.Frame()
+	for range 20 {
+		tt.Scroll(800, 400, 0, 120)
+	}
+	if first, _ := w.list.Visible(); first < 50 {
+		t.Fatalf("scrolled to row %d only", first)
+	}
+	// Another commit, whose changes load while frames run, shows from the
+	// top, not where the last one was scrolled to.
+	w.hold = true
+	w.setSource(source{kind: sourceCommit, ref: resolve("HEAD~1")})
+	tt.Frame()
+	w.hold = false
+	for len(w.held) > 0 {
+		fn := w.held[0]
+		w.held = w.held[1:]
+		fn()
+	}
+	tt.Frame()
+	if first, _ := w.list.Visible(); first != 0 {
+		t.Errorf("the other commit shows row %d of %d first", first, len(w.rows))
 	}
 }
