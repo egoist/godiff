@@ -216,10 +216,15 @@ func (w *window) sidebar(c *ui.Context) {
 	t := c.Theme()
 	pal := paletteFor(t)
 	bar := c.TitleBar()
+	sidebarRight := w.settings.SidebarPosition == "right"
+	left, right := bar.Left+6, float32(10)
+	if sidebarRight {
+		left, right = 10, bar.Right+6
+	}
 	ui.Column(c).Width(w.sidebarWidth).Shrink(0).Background(w.sidebarBg(t)).Children(func() {
 		// The title bar, under the window controls: the views of the
-		// sidebar and its toggle, centered on the traffic lights.
-		ui.Row(c).Height(titleBarHeight).Padding(0, 10, 0, bar.Left+6).Gap(6).DragWindow().Children(func() {
+		// sidebar and its toggle, centered on the window controls.
+		ui.Row(c).Height(titleBarHeight).Padding(0, right, 0, left).Gap(6).DragWindow().Children(func() {
 			ui.Spacer(c)
 			if w.tabControl(c) {
 				w.commitOpen = false
