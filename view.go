@@ -73,11 +73,16 @@ var debugFrames = os.Getenv("GODIFF_DEBUG") != ""
 func (w *window) toolbar(c *ui.Context, pal *palette) {
 	t := c.Theme()
 	bar := c.TitleBar()
+	sidebarRight := w.sidebarShown && w.settings.SidebarPosition == "right"
 	left := float32(14)
-	if !w.sidebarShown || w.settings.SidebarPosition == "right" {
+	if !w.sidebarShown || sidebarRight {
 		left = bar.Left + 8
 	}
-	ui.Row(c).Height(titleBarHeight).Padding(0, 12, 0, left).Gap(8).Shrink(0).DragWindow().
+	right := float32(12)
+	if !sidebarRight {
+		right += bar.Right
+	}
+	ui.Row(c).Height(titleBarHeight).Padding(0, right, 0, left).Gap(8).Shrink(0).DragWindow().
 		BorderWidth(0, 0, 1, 0).BorderColor(pal.cardBorder).Background(pal.headerBg.Alpha(0.6)).Children(func() {
 		if !w.sidebarShown {
 			w.sidebarToggle(c)
