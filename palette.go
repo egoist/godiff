@@ -137,6 +137,10 @@ func (w *window) copyComments() {
 
 // palette shows the command bar while it is open.
 func (w *window) palette(c *ui.Context) {
+	if !w.paletteOpen {
+		w.paletteQuery = ""
+		return
+	}
 	t := c.Theme()
 	pal := paletteFor(t)
 	q := strings.TrimSpace(w.paletteQuery)

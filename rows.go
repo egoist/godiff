@@ -30,6 +30,18 @@ type fileState struct {
 	// metric is computed once the contents are loaded.
 	metric      fileMetrics
 	metricsDone bool
+	// spans keeps the styled code of the lines shown, which does not change
+	// from frame to frame.
+	spans map[spanKey][]ui.Span
+}
+
+// spanKey identifies the code of a line on one side, in the light or the
+// dark.
+type spanKey struct {
+	hunk, index int32
+	num         int32
+	side        side
+	dark        bool
 }
 
 type gapShown struct{ top, bottom int }
@@ -45,6 +57,7 @@ const (
 	rowLine                   // a line, or a pair of lines side by side
 	rowComment                // a comment on the line above
 	rowEnd                    // the bottom of a file's card
+	rowCommit                 // the message of the commit shown
 )
 
 // row is a row of the diff surface.
@@ -185,6 +198,10 @@ const (
 // buildRows lays out the rows of the files.
 func (w *window) buildRows() {
 	rows := w.rows[:0]
+	if w.source.kind == sourceCommit && w.commit != nil {
+		// The message scrolls with the changes, long as it may be.
+		rows = append(rows, row{kind: rowCommit})
+	}
 	for fi, f := range w.files {
 		if !w.fileVisible(fi) {
 			continue
@@ -311,6 +328,9 @@ func (w *window) appendComments(rows []row, idx int32, f *fileState, l *diff.Lin
 
 // key returns the identity of a row.
 func (w *window) key(r *row) rowKey {
+	if r.kind == rowCommit {
+		return rowKey{kind: rowCommit}
+	}
 	f := w.files[r.file]
 	k := rowKey{kind: r.kind, file: f.Path, gap: r.gap, comment: r.comment}
 	if r.kind == rowLine {

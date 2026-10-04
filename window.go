@@ -3,9 +3,12 @@ package main
 import (
 	"errors"
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
 	"runtime"
+	"runtime/debug"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -32,8 +35,10 @@ type source struct {
 	ref  string // the commit, or the branch
 }
 
-// historyPage is how many commits the History tab loads at a time.
-const historyPage = 30
+// historyPage is how many commits the History tab loads at a time: git
+// lists hundreds in a few milliseconds, and the list builds only the rows
+// in view.
+const historyPage = 200
 
 // session is the review of one source, kept while the window shows
 // another.
@@ -59,7 +64,9 @@ type window struct {
 	loadErr    error
 	gen        int // counts loads, to drop the results of older ones
 	genA       atomic.Int64
-	viewed     map[string]string
+	// loadStart is when the load started.
+	loadStart time.Time
+	viewed    map[string]string
 
 	// The sidebar.
 	sidebarShown bool
@@ -79,6 +86,7 @@ type window struct {
 	historyMore  bool
 	historyList  ui.ListState
 	historyEl    *ui.Element
+	commitTimes  map[string]commitTime
 	// historyFilter filters the History tab, apart from the files'.
 	historyFilter  string
 	historyLoading bool
@@ -101,6 +109,12 @@ type window struct {
 	selFile, selHunk int
 	focusList        bool
 	focusedOnce      bool
+	switchedAt       time.Time // when the source last changed, for GODIFF_DEBUG
+	debugPressed     bool
+	// hold keeps the background work of tests in held, to run frames
+	// while it waits.
+	hold bool
+	held []func()
 	// typing is set while a field has the focus, whose keys are its own.
 	typing bool
 
@@ -244,6 +258,7 @@ func newWindow(repo *git.Repo, src source) *window {
 		viewed:       state.viewed(repo.Root),
 		hscroll:      map[string]float32{},
 		closedDirs:   map[string]bool{},
+		commitTimes:  map[string]commitTime{},
 		reloaded:     map[string]bool{},
 		fileMatches:  map[int]bool{},
 		selFile:      -1,
@@ -290,6 +305,11 @@ func (w *window) applySettings(s Settings) {
 // which have no window.
 func (w *window) background(fn func()) {
 	if w.win == nil {
+		if w.hold {
+			// Tests run frames while the work waits.
+			w.held = append(w.held, fn)
+			return
+		}
 		fn()
 		return
 	}
@@ -301,6 +321,16 @@ func (w *window) update(fn func()) {
 	if w.win == nil {
 		fn()
 		return
+	}
+	if debugFrames {
+		inner := fn
+		fn = func() {
+			start := time.Now()
+			inner()
+			if d := time.Since(start); d > 2*time.Millisecond {
+				log.Printf("slow update: %v", d)
+			}
+		}
 	}
 	w.win.Update(fn)
 }
@@ -322,11 +352,34 @@ func (w *window) splitFile(f *fileState) bool {
 	return !f.oneSided()
 }
 
-// setSource shows another source in the window.
+// setSource shows another source in the window: at once, with what is
+// known of it, as the commit's message from the history; its changes come
+// as they load.
 func (w *window) setSource(src source) {
 	if w.source == src {
 		return
 	}
+	if debugFrames {
+		w.switchedAt = time.Now()
+		log.Printf("switch to %+v", src)
+		go probeMainThread(time.Second)
+	}
+	w.commitOpen = false
+	w.switchTo(src)
+	if src.kind == sourceCommit {
+		for i := range w.history {
+			if w.history[i].Hash == src.ref {
+				c := w.history[i]
+				w.commit = &c
+			}
+		}
+	}
+	w.load()
+}
+
+// switchTo makes a source the one shown, its review in place of the
+// other's.
+func (w *window) switchTo(src source) {
 	// Each source keeps its review: the comments, and what was viewed of a
 	// commit.
 	if w.sessions == nil {
@@ -345,51 +398,86 @@ func (w *window) setSource(src source) {
 	}
 	w.source = src
 	w.files, w.rows, w.commit = nil, nil, nil
+	// The tree refers to the files by their index: it goes with them.
+	w.buildTree()
+	w.loadErr = nil
 	w.list = ui.ListState{Key: w.list.Key, Header: w.list.Header}
 	w.selFile, w.selHunk = -1, -1
 	w.finding, w.query = false, ""
 	w.hscroll = map[string]float32{}
-	w.commitOpen = false
+	w.current = 0
 	if w.win != nil {
 		w.win.SetTitle(windowTitle(w.repo.Root, src))
 	}
-	w.load()
 }
 
-// load reads the changes of the source, then the contents of their files.
+// preloadBudget is how long after it starts a load may wait for the
+// contents of the first files, to show them colored at once rather than
+// as they come.
+const preloadBudget = 80 * time.Millisecond
+
+// load reads the changes of the source, the contents of the first files
+// within preloadBudget, then the contents of the others.
 func (w *window) load() {
 	w.gen++
 	gen := w.gen
 	src := w.source
 	opts := git.Options{ShowWhitespace: w.settings.ShowWhitespace}
 	w.loading = true
+	w.loadStart = time.Now()
+	started := w.loadStart
 	w.loadErr = nil
 	w.changed = false
 	w.genA.Store(int64(gen))
+	// What is known already needs no git: the commit, from the history, and
+	// the branch, which showing a commit does not change.
+	known := w.commit
+	if known != nil && known.Hash != src.ref {
+		known = nil
+	}
+	branch := w.branch
+	needBranch := src.kind != sourceCommit || branch == ""
+	// Files unchanged since the last load keep their contents.
+	loadedFiles := map[string]bool{}
+	for _, f := range w.files {
+		if f.loaded {
+			loadedFiles[f.Path+"\x00"+f.Fingerprint] = true
+		}
+	}
 	w.background(func() {
 		var (
 			files  []*diff.File
-			commit *git.Commit
+			commit = known
 			base   string
 			err    error
+			wg     sync.WaitGroup
 		)
-		branch := w.repo.Branch()
+		if needBranch {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				branch = w.repo.Branch()
+			}()
+		}
 		sig := ""
 		switch src.kind {
 		case sourceWorkingTree:
 			sig = w.repo.StatusSignature()
 			files, err = w.repo.WorkingTree(opts)
 		case sourceCommit:
-			var c git.Commit
-			c, err = w.repo.CommitInfo(src.ref)
-			if err == nil {
+			if commit == nil {
+				var c git.Commit
+				c, err = w.repo.CommitInfo(src.ref)
 				commit = &c
-				files, err = w.repo.CommitDiff(c, opts)
+			}
+			if err == nil {
+				files, err = w.repo.CommitDiff(*commit, opts)
 			}
 		case sourceBranch:
 			sig = w.repo.StatusSignature()
 			files, base, err = w.repo.Compare(src.ref, opts)
 		}
+		wg.Wait()
 		// The revisions of the old and the new side; "" is the work tree.
 		var oldRev, newRev string
 		switch src.kind {
@@ -405,6 +493,18 @@ func (w *window) load() {
 		case sourceBranch:
 			oldRev = base
 		}
+		var pre map[string]loaded
+		if err == nil && !w.stale(gen) {
+			var fresh []*diff.File
+			for _, f := range files {
+				if !loadedFiles[f.Path+"\x00"+f.Fingerprint] {
+					fresh = append(fresh, f)
+				}
+			}
+			if budget := preloadBudget - time.Since(started); budget > 0 {
+				pre = w.preload(fresh, oldRev, newRev, budget)
+			}
+		}
 		w.update(func() {
 			if gen != w.gen {
 				return
@@ -412,29 +512,84 @@ func (w *window) load() {
 			w.loading = false
 			w.loadErr = err
 			w.branch = branch
-			w.commit = commit
+			if err == nil {
+				w.commit = commit
+			}
 			w.base = base
 			if sig != "" {
 				w.signature = sig
 			}
 			w.setFiles(files)
+			for _, f := range w.files {
+				if l, ok := pre[f.Path]; ok && !f.loaded {
+					l.file = f
+					l.apply()
+				}
+			}
 			if !w.loadedOnce && len(files) == 0 && src.kind != sourceCommit {
 				// Nothing to review: the history shows instead.
 				w.tab = 1
 			}
 			w.loadedOnce = true
 			if err == nil {
-				// Files unchanged since the last load keep their contents.
-				var files []*fileState
+				var rest []*fileState
 				for _, f := range w.files {
 					if !f.loaded {
-						files = append(files, f)
+						rest = append(rest, f)
 					}
 				}
-				w.background(func() { w.loadContents(gen, oldRev, newRev, files) })
+				if len(rest) > 0 {
+					w.background(func() { w.loadContents(gen, oldRev, newRev, rest) })
+				}
 			}
 		})
 	})
+}
+
+// preload reads and colors the contents of files, in order, until
+// budget runs out: the files it did not finish load later, as they come.
+func (w *window) preload(files []*diff.File, oldRev, newRev string, budget time.Duration) map[string]loaded {
+	if len(files) == 0 {
+		return nil
+	}
+	contents, err := w.repo.NewContents()
+	if err != nil {
+		return nil
+	}
+	defer boostGC()()
+	results := make(chan loaded)
+	var stop atomic.Bool
+	go func() {
+		defer close(results)
+		defer contents.Close()
+		for _, f := range files {
+			if stop.Load() {
+				return
+			}
+			l := w.read(contents, f, oldRev, newRev)
+			l.finish()
+			select {
+			case results <- l:
+			case <-time.After(budget):
+				return // nobody waits anymore
+			}
+		}
+	}()
+	out := map[string]loaded{}
+	deadline := time.NewTimer(budget)
+	defer deadline.Stop()
+	for {
+		select {
+		case l, ok := <-results:
+			if !ok {
+				return out
+			}
+			out[l.path] = l
+		case <-deadline.C:
+			stop.Store(true)
+			return out
+		}
+	}
 }
 
 // setFiles shows newly read files, keeping what the user did to those
@@ -500,11 +655,85 @@ const maxContent = 2 << 20
 // loaded is a file's contents, read and tokenized, or decoded for
 // pictures.
 type loaded struct {
-	file               *fileState
+	file               *fileState // where they go, once known
 	oldLines, newLines []string
 	oldHL, newHL       [][]highlight.Seg
 	oldData, newData   []byte // of pictures
 	oldImage, newImage *ui.Bitmap
+	path, oldPath      string
+}
+
+// read reads both sides of a file: lines of text, or the data of a
+// picture.
+func (w *window) read(contents *git.Contents, f *diff.File, oldRev, newRev string) loaded {
+	l := loaded{path: f.Path, oldPath: f.OldPath}
+	raw := func(rev, path string, limit int) []byte {
+		var data []byte
+		if rev == "" {
+			data = w.repo.ReadWorkTree(path)
+		} else {
+			data, _ = contents.Read(rev, path)
+		}
+		if len(data) > limit {
+			return nil
+		}
+		return data
+	}
+	hasOld := oldRev != "" && f.Status != diff.Added && f.Status != diff.Untracked
+	hasNew := f.Status != diff.Deleted
+	if f.Binary && isImage(f.Path) {
+		if hasOld {
+			l.oldData = raw(oldRev, f.OldPath, maxImage)
+		}
+		if hasNew {
+			l.newData = raw(newRev, f.Path, maxImage)
+		}
+		return l
+	}
+	if f.Binary || f.Directory || f.TooLarge {
+		return l
+	}
+	text := func(data []byte) []string {
+		if data == nil || diff.IsBinary(data) {
+			return nil
+		}
+		lines := diff.SplitLines(string(data))
+		if lines == nil {
+			lines = []string{}
+		}
+		return lines
+	}
+	if hasOld {
+		l.oldLines = text(raw(oldRev, f.OldPath, maxContent))
+	}
+	if hasNew {
+		l.newLines = text(raw(newRev, f.Path, maxContent))
+	}
+	return l
+}
+
+// finish colors the lines, and decodes the pictures.
+func (l *loaded) finish() {
+	l.oldHL = highlight.Lines(l.oldPath, l.oldLines)
+	l.newHL = highlight.Lines(l.path, l.newLines)
+	if l.oldData != nil {
+		l.oldImage, _ = ui.DecodeBitmap(l.oldData)
+	}
+	if l.newData != nil {
+		l.newImage, _ = ui.DecodeBitmap(l.newData)
+	}
+}
+
+// apply gives the contents to their file, on the main thread.
+func (l *loaded) apply() {
+	f := l.file
+	f.oldLines, f.newLines = l.oldLines, l.newLines
+	f.oldHL, f.newHL = l.oldHL, l.newHL
+	f.oldImage, f.newImage = l.oldImage, l.newImage
+	f.oldSize, f.newSize = len(l.oldData), len(l.newData)
+	f.loaded = true
+	f.metricsDone = false
+	f.spans = nil
 }
 
 // maxImage is the size of the pictures shown.
@@ -522,6 +751,7 @@ func isImage(path string) bool {
 // loadContents reads both sides of the files, for their colors and their
 // unchanged lines, and shows them as they come.
 func (w *window) loadContents(gen int, oldRev, newRev string, files []*fileState) {
+	defer boostGC()()
 	contents, err := w.repo.NewContents()
 	if err != nil {
 		return
@@ -531,76 +761,26 @@ func (w *window) loadContents(gen int, oldRev, newRev string, files []*fileState
 	jobs := make(chan loaded)
 	results := make(chan loaded)
 	var wg sync.WaitGroup
-	for range max(runtime.NumCPU()-1, 1) {
+	// A few workers: more would take the CPU, and the collector's pauses,
+	// from the main thread, which draws the window.
+	for range highlightWorkers() {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
 			for job := range jobs {
-				job.oldHL = highlight.Lines(job.file.OldPath, job.oldLines)
-				job.newHL = highlight.Lines(job.file.Path, job.newLines)
-				if job.oldData != nil {
-					job.oldImage, _ = ui.DecodeBitmap(job.oldData)
-				}
-				if job.newData != nil {
-					job.newImage, _ = ui.DecodeBitmap(job.newData)
-				}
+				job.finish()
 				results <- job
 			}
 		}()
 	}
 	go func() {
 		defer close(jobs)
-		read := func(rev, path string) []string {
-			var data []byte
-			if rev == "" {
-				data = w.repo.ReadWorkTree(path)
-			} else {
-				data, _ = contents.Read(rev, path)
-			}
-			if data == nil || len(data) > maxContent || diff.IsBinary(data) {
-				return nil
-			}
-			lines := diff.SplitLines(string(data))
-			if lines == nil {
-				lines = []string{}
-			}
-			return lines
-		}
-		readRaw := func(rev, path string) []byte {
-			var data []byte
-			if rev == "" {
-				data = w.repo.ReadWorkTree(path)
-			} else {
-				data, _ = contents.Read(rev, path)
-			}
-			if len(data) > maxImage {
-				return nil
-			}
-			return data
-		}
 		for _, f := range files {
 			if w.stale(gen) {
 				return
 			}
-			job := loaded{file: f}
-			if f.Binary && isImage(f.Path) {
-				if oldRev != "" && f.Status != diff.Added && f.Status != diff.Untracked {
-					job.oldData = readRaw(oldRev, f.OldPath)
-				}
-				if f.Status != diff.Deleted {
-					job.newData = readRaw(newRev, f.Path)
-				}
-				jobs <- job
-				continue
-			}
-			if !f.Binary && !f.Directory && !f.TooLarge {
-				if oldRev != "" && f.Status != diff.Added && f.Status != diff.Untracked {
-					job.oldLines = read(oldRev, f.OldPath)
-				}
-				if f.Status != diff.Deleted {
-					job.newLines = read(newRev, f.Path)
-				}
-			}
+			job := w.read(contents, f.File, oldRev, newRev)
+			job.file = f
 			jobs <- job
 		}
 	}()
@@ -620,13 +800,8 @@ func (w *window) loadContents(gen int, oldRev, newRev string, files []*fileState
 			if gen != w.gen {
 				return
 			}
-			for _, l := range done {
-				f := l.file
-				f.oldLines, f.newLines = l.oldLines, l.newLines
-				f.oldHL, f.newHL = l.oldHL, l.newHL
-				f.oldImage, f.newImage = l.oldImage, l.newImage
-				f.oldSize, f.newSize = len(l.oldData), len(l.newData)
-				f.loaded = true
+			for i := range done {
+				done[i].apply()
 			}
 			w.rowsDirty = true
 		})
@@ -646,6 +821,35 @@ func (w *window) loadContents(gen int, oldRev, newRev string, files []*fileState
 		}
 	}
 }
+
+// boostGC lets the heap grow further between collections while files load:
+// Chroma's lexers make much garbage, and every collection has the main
+// thread, which allocates as it draws, help with it. The function it
+// returns ends the boost.
+func boostGC() func() {
+	gcBoost.Lock()
+	if gcBoost.n == 0 {
+		gcBoost.old = debug.SetGCPercent(400)
+	}
+	gcBoost.n++
+	gcBoost.Unlock()
+	return func() {
+		gcBoost.Lock()
+		gcBoost.n--
+		if gcBoost.n == 0 {
+			debug.SetGCPercent(gcBoost.old)
+		}
+		gcBoost.Unlock()
+	}
+}
+
+var gcBoost struct {
+	sync.Mutex
+	n, old int
+}
+
+// highlightWorkers is how many files are highlighted at once.
+func highlightWorkers() int { return min(max(runtime.NumCPU()/4, 1), 2) }
 
 func (w *window) stale(gen int) bool { return w.genA.Load() != int64(gen) }
 
@@ -772,4 +976,47 @@ func errorText(err error) string {
 		return strings.TrimSpace(ge.Stderr)
 	}
 	return fmt.Sprint(err)
+}
+
+// probeMainThread logs how long the main thread kept a function waiting,
+// at worst, over a while: how long the window could not respond.
+func probeMainThread(d time.Duration) {
+	var worst, total time.Duration
+	var slow, n int
+	for end := time.Now().Add(d); time.Now().Before(end); n++ {
+		start := time.Now()
+		mygo.RunOnMain(func() {})
+		wait := time.Since(start)
+		total += wait
+		worst = max(worst, wait)
+		if wait > 16*time.Millisecond {
+			slow++
+		}
+		time.Sleep(2 * time.Millisecond)
+	}
+	log.Printf("main thread: worst wait %v, average %v, %d of %d waits over 16ms", worst, total/time.Duration(max(n, 1)), slow, n)
+}
+
+// watchMainThread logs, for GODIFF_DEBUG, whenever the main thread keeps
+// a function waiting over 30ms: when the window cannot respond.
+func watchMainThread() {
+	limit := 30 * time.Millisecond
+	if ms, err := strconv.Atoi(os.Getenv("GODIFF_DEBUG_BLOCK_MS")); err == nil {
+		limit = time.Duration(ms) * time.Millisecond
+	}
+	var gc debug.GCStats
+	for {
+		start := time.Now()
+		mygo.RunOnMain(func() {})
+		if wait := time.Since(start); wait > limit {
+			n := gc.NumGC
+			debug.ReadGCStats(&gc)
+			pause := time.Duration(0)
+			if len(gc.Pause) > 0 {
+				pause = gc.Pause[0]
+			}
+			log.Printf("main thread blocked %v (GC cycles since last: %d, last pause %v)", wait, gc.NumGC-n, pause)
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
 }

@@ -16,7 +16,10 @@ func (w *window) view(c *ui.Context) {
 	if debugFrames {
 		start := time.Now()
 		defer func() {
-			if d := time.Since(start); d > 4*time.Millisecond {
+			d := time.Since(start)
+			if since := start.Sub(w.switchedAt); since < 3*time.Second {
+				log.Printf("frame %v after the switch: view %v (files %d, rows %d, loading %v)", since, d, len(w.files), len(w.rows), w.loading)
+			} else if d > 4*time.Millisecond {
 				log.Printf("slow view: %v (rows %d, comments %d)", d, len(w.rows), len(w.comments))
 			}
 		}()
@@ -208,11 +211,29 @@ func (w *window) mainArea(c *ui.Context, pal *palette) {
 		w.rowsDirty = true
 	}
 
+	// A load shows "Thinking…" once it takes long: until then the window
+	// keeps what it showed, so that quick loads change it once.
+	waiting := w.loading && len(w.files) == 0
+	slow := false
+	if waiting {
+		if left := thinkingDelay - time.Since(w.loadStart); left > 0 {
+			c.After(left)
+		} else {
+			slow = true
+		}
+	}
+	// The commit's message shows at once, from the history, until it
+	// shows atop the changes.
+	if w.source.kind == sourceCommit && w.commit != nil && w.loadErr == nil && len(w.files) == 0 {
+		w.commitMessage(c, pal).Margin(11, 12, 0)
+	}
 	switch {
 	case w.loadErr != nil:
 		emptyPanel(c, pal, "Unable to read repository", errorText(w.loadErr), nil)
-	case w.loading && len(w.files) == 0:
+	case slow:
 		thinking(c)
+	case waiting && len(w.files) == 0:
+		ui.Box(c).Grow(1)
 	case len(w.files) == 0:
 		title, detail := "No local changes", abbreviateHome(w.repo.Root)
 		switch w.source.kind {
@@ -244,18 +265,15 @@ func (w *window) mainArea(c *ui.Context, pal *palette) {
 			emptyPanel(c, pal, title, detail, nil)
 			return
 		}
-		if w.source.kind == sourceCommit && w.commit != nil {
-			w.commitMessage(c, pal)
-		}
 		w.diffList(c)
 	}
 }
 
 // commitMessage shows the message of the commit reviewed.
-func (w *window) commitMessage(c *ui.Context, pal *palette) {
+func (w *window) commitMessage(c *ui.Context, pal *palette) *ui.Element {
 	t := c.Theme()
 	cm := w.commit
-	ui.Column(c).Margin(11, 12, 0).Padding(12, 16).Gap(6).Radius(cardRadius).Background(pal.headerBg).Border(1, pal.cardBorder).Children(func() {
+	return ui.Column(c).Padding(12, 16).Gap(6).Radius(cardRadius).Background(pal.headerBg).Border(1, pal.cardBorder).Children(func() {
 		ui.Row(c).Gap(10).Children(func() {
 			ui.Avatar(c, cm.Author, nil).Size(26, 26)
 			ui.Column(c).Grow(1).MinWidth(0).Gap(1).Children(func() {
@@ -287,6 +305,9 @@ func emptyPanel(c *ui.Context, pal *palette, title, detail string, actions func(
 		})
 	})
 }
+
+// thinkingDelay is how long a load goes before the window says so.
+const thinkingDelay = 200 * time.Millisecond
 
 // thinking shows that the changes are loading.
 func thinking(c *ui.Context) {

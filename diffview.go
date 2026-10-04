@@ -84,7 +84,7 @@ func (w *window) diffList(c *ui.Context) {
 	w.diffListEl = list
 
 	// The file at the top follows the scrolling, and the tree with it.
-	if first, _ := w.list.Visible(); first >= 0 && first < len(w.rows) {
+	if first, _ := w.list.Visible(); first >= 0 && first < len(w.rows) && w.rows[first].kind != rowCommit {
 		file := int(w.rows[first].file)
 		if file != w.current && time.Since(w.revealedAt) > 1200*time.Millisecond {
 			w.current = file
@@ -110,6 +110,10 @@ func (w *window) revealFile(i int) {
 
 func (w *window) diffRow(c *ui.Context, pal *palette, i int) {
 	r := &w.rows[i]
+	if r.kind == rowCommit {
+		w.commitMessage(c, pal).Margin(12, 0, 0)
+		return
+	}
 	f := w.files[r.file]
 	switch r.kind {
 	case rowHeader:
@@ -573,20 +577,7 @@ func (w *window) lineCell(c *ui.Context, pal *palette, f *fileState, r *row, s l
 				num(s.num, gutter-4)
 			}
 		})
-		var marks []mark
-		for _, rg := range s.words {
-			marks = append(marks, mark{Range: rg, color: wordColor})
-		}
-		if w.searching() {
-			active := w.activeMatch(f, s)
-			for _, rg := range findRanges(s.text, w.query) {
-				color := pal.match
-				if active {
-					color = pal.matchNow
-				}
-				marks = append(marks, mark{Range: rg, color: color})
-			}
-		}
+		spans := w.lineSpans(f, s, sd, pal, wordColor)
 		// The button commenting on the line, at the edge of the numbers
 		// while the pointer is over the line; always built, so that the
 		// elements after it keep their state.
@@ -606,13 +597,45 @@ func (w *window) lineCell(c *ui.Context, pal *palette, f *fileState, r *row, s l
 		// The margin keeps the clipped code clear of the line numbers.
 		code := ui.Box(c).Grow(1).Basis(0).MinWidth(0).ClipX().Margin(0, 10)
 		code.Children(func() {
-			text := ui.RichText(c, codeSpans(s.text, s.segs, marks, pal)...).Font(w.codeFont()).
+			text := ui.RichText(c, spans...).Font(w.codeFont()).
 				FontSize(w.codeSize()).FixedLineHeight(lh).TextColor(pal.code)
 			if !w.settings.WordWrap {
 				text.NoWrap().AlignSelf(ui.Start).Left(-hs)
 			}
 		})
 	})
+}
+
+// lineSpans styles the code of a line: kept from frame to frame, apart from
+// the lines holding matches of the find bar, whose marks move.
+func (w *window) lineSpans(f *fileState, s lineSide, sd side, pal *palette, wordColor ui.Color) []ui.Span {
+	var marks []mark
+	for _, rg := range s.words {
+		marks = append(marks, mark{Range: rg, color: wordColor})
+	}
+	if w.searching() {
+		if found := findRanges(s.text, w.query); found != nil {
+			active := w.activeMatch(f, s)
+			for _, rg := range found {
+				color := pal.match
+				if active {
+					color = pal.matchNow
+				}
+				marks = append(marks, mark{Range: rg, color: color})
+			}
+			return codeSpans(s.text, s.segs, marks, pal)
+		}
+	}
+	key := spanKey{hunk: s.hunk, index: s.index, num: int32(s.num), side: sd, dark: pal == &darkPalette}
+	if spans, ok := f.spans[key]; ok {
+		return spans
+	}
+	spans := codeSpans(s.text, s.segs, marks, pal)
+	if f.spans == nil {
+		f.spans = map[spanKey][]ui.Span{}
+	}
+	f.spans[key] = spans
+	return spans
 }
 
 // blend lays a translucent color over another.

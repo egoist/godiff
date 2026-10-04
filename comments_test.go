@@ -69,3 +69,39 @@ func TestCommentOnExpandedLine(t *testing.T) {
 		t.Errorf("markdown:\n%s", md)
 	}
 }
+
+func TestSwitchSourceOnFilesTab(t *testing.T) {
+	w, tt := newTestWindow(t, testRepo(t))
+	w.tab = 0
+	tt.Frame()
+	hash, err := w.repo.Resolve("HEAD")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Frames run while the commit's files load: the tree must not show
+	// the files of the work tree, gone.
+	w.hold = true
+	w.setSource(source{kind: sourceCommit, ref: hash})
+	tt.Frame()
+	// The commit shows at once, its message from the history, before its
+	// changes load.
+	if w.source.kind != sourceCommit || tt.HasText("new.go") || !tt.HasText("First commit") {
+		t.Errorf("source %+v, texts %q", w.source, tt.Texts())
+	}
+	w.hold = false
+	for len(w.held) > 0 {
+		fn := w.held[0]
+		w.held = w.held[1:]
+		fn()
+	}
+	tt.Frame()
+	if len(w.files) != 3 || !tt.HasText("main.go") || tt.HasText("new.go") {
+		t.Errorf("files %d", len(w.files))
+	}
+	// Its first files came colored, with their contents.
+	for _, f := range w.files {
+		if !f.loaded {
+			t.Errorf("%s not loaded", f.Path)
+		}
+	}
+}

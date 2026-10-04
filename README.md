@@ -102,8 +102,11 @@ go run ./tools/genicon    # render resources/icon.svg to the app icon
 
 `GODIFF_SNAPSHOTS=<dir> go test .` saves PNGs of the views the tests drive, and
 `GODIFF_CAPTURE=<file.png>` makes the app save a picture of its window once
-loaded, then quit. `GODIFF_DEBUG=1` logs the frames that take more than 4ms to
-build.
+loaded, then quit. `GODIFF_DEBUG=1` logs every git command with its duration, the
+frames that take more than 4ms to build, and whenever the main thread keeps
+work waiting over 30ms. `GODIFF_NAME=<name>` runs a build apart from the
+installed app, which would otherwise take its windows, and
+`GODIFF_STARTUP_PROFILE=<file>` writes a CPU profile of the first seconds.
 
 The code is in a few parts:
 

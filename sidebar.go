@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"log"
 	"runtime"
 	"strings"
 	"time"
@@ -568,9 +569,10 @@ func (w *window) historyView(c *ui.Context) {
 			entries = append(entries, entry{commit: cm})
 		}
 	}
+	target := w.source
 	current := -1
 	for i, e := range entries {
-		if (e.local && w.source.kind != sourceCommit) || (e.commit != nil && w.source.kind == sourceCommit && w.source.ref == e.commit.Hash) {
+		if (e.local && target.kind != sourceCommit) || (e.commit != nil && target.kind == sourceCommit && target.ref == e.commit.Hash) {
 			current = i
 		}
 	}
@@ -602,7 +604,12 @@ func (w *window) historyView(c *ui.Context) {
 	now := time.Now()
 	list := ui.List(c, &w.historyList, len(entries), func(i int) {
 		e := entries[i]
-		row := ui.Row(c).Gap(8).Padding(5, 8).Radius(6).AlignItems(ui.Start)
+		row := ui.Row(c).Gap(8).Padding(5, 8).Radius(6).AlignItems(ui.Start).Role(ui.RoleButton)
+		if e.local {
+			row.Label("Uncommitted changes")
+		} else {
+			row.Label(e.commit.Subject)
+		}
 		muted, ref := t.TextMuted, pal.ref
 		switch {
 		case i == current && focused:
@@ -614,6 +621,9 @@ func (w *window) historyView(c *ui.Context) {
 			row.Background(ui.RGBA(127, 127, 127, 0.08))
 		}
 		if row.Clicked() {
+			if debugFrames {
+				log.Printf("history row %d clicked", i)
+			}
 			open(i)
 		}
 		row.Children(func() {
@@ -623,12 +633,18 @@ func (w *window) historyView(c *ui.Context) {
 				return
 			}
 			cm := e.commit
+			when := w.commitTimes[cm.Hash]
+			if when.at != now.Truncate(time.Minute) {
+				// Formatted once a minute, rather than every frame.
+				when = commitTime{at: now.Truncate(time.Minute), ago: relativeTime(now, cm.Time), full: cm.Time.Format("Mon Jan 2 15:04:05 2006")}
+				w.commitTimes[cm.Hash] = when
+			}
 			ui.Text(c, cm.Short).Font(w.codeFont()).FontSize(12).TextColor(ref).Width(56).Shrink(0)
 			ui.Column(c).Grow(1).MinWidth(0).Gap(2).Children(func() {
 				ui.Text(c, cm.Subject).FontSize(12).SingleLine().Tooltip(cm.Subject)
 				ui.Row(c).Gap(6).Children(func() {
 					ui.Text(c, cm.Author).FontSize(10).SingleLine().TextColor(muted).Grow(1).MinWidth(0)
-					ui.Text(c, relativeTime(now, cm.Time)).FontSize(10).TextColor(muted).Shrink(0).Tooltip(cm.Time.Format("Mon Jan 2 15:04:05 2006"))
+					ui.Text(c, when.ago).FontSize(10).TextColor(muted).Shrink(0).Tooltip(when.full)
 				})
 			})
 		})
@@ -645,13 +661,20 @@ func (w *window) historyView(c *ui.Context) {
 	if list.Shortcut(0, ui.KeyUp) {
 		open(max(current-1, 0))
 	}
-	// More commits load as the end comes into view.
+	// More commits load well before the end comes into view, so that
+	// scrolling does not stop there.
 	if q == "" && w.historyMore && !w.historyLoading {
-		if _, last := w.historyList.Visible(); last >= len(entries)-3 {
+		if _, last := w.historyList.Visible(); last >= len(entries)-historyPage/2 {
 			w.historyLimit += historyPage
 			w.loadHistory()
 		}
 	}
+}
+
+// commitTime is how a commit's time shows, as of a minute.
+type commitTime struct {
+	at        time.Time
+	ago, full string
 }
 
 // launchWorkTree is the source of uncommitted changes: the work tree, or

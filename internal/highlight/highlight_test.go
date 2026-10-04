@@ -29,3 +29,24 @@ func TestLines(t *testing.T) {
 		t.Error("plain text highlighted")
 	}
 }
+
+func TestLexerCache(t *testing.T) {
+	for _, tc := range []struct{ name, lexer string }{
+		{"a/main.go", "Go"},
+		{"b/other.go", "Go"},
+		{"CMakeLists.txt", "CMake"},
+		{"notes.txt", ""},
+		{"Makefile", "Makefile"},
+		{"types.d.ts", "TypeScript"},
+		{"app.ts", "TypeScript"},
+		{"Dockerfile", "Docker"},
+	} {
+		got := ""
+		if l := Lexer(tc.name); l != nil {
+			got = l.Config().Name
+		}
+		if (tc.lexer == "" && got != "" && got != "plaintext") || (tc.lexer != "" && got != tc.lexer) {
+			t.Errorf("%s: %q, want %q", tc.name, got, tc.lexer)
+		}
+	}
+}

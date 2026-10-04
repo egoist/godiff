@@ -9,9 +9,11 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strconv"
 	"strings"
@@ -69,8 +71,41 @@ func (e *Error) Error() string {
 
 func (e *Error) Unwrap() error { return e.Err }
 
+var (
+	binaryOnce sync.Once
+	binaryPath string
+)
+
+// binary returns the git to run. On macOS, /usr/bin/git is a shim that
+// finds the developer tools' git each time it runs, which doubles what
+// starting git takes: the git it would run is found once instead.
+func binary() string {
+	binaryOnce.Do(func() {
+		binaryPath = "git"
+		path, err := exec.LookPath("git")
+		if err != nil {
+			return
+		}
+		binaryPath = path
+		if runtime.GOOS != "darwin" || path != "/usr/bin/git" {
+			return
+		}
+		// xcode-select prints the developer directory without asking to
+		// install the tools, as xcrun would.
+		out, err := exec.Command("/usr/bin/xcode-select", "-p").Output()
+		if err != nil {
+			return
+		}
+		real := filepath.Join(strings.TrimSpace(string(out)), "usr", "bin", "git")
+		if fi, err := os.Stat(real); err == nil && !fi.IsDir() {
+			binaryPath = real
+		}
+	})
+	return binaryPath
+}
+
 func run(ctx context.Context, dir string, stdin io.Reader, args ...string) ([]byte, error) {
-	cmd := exec.CommandContext(ctx, "git", args...)
+	cmd := exec.CommandContext(ctx, binary(), args...)
 	cmd.Dir = dir
 	cmd.Stdin = stdin
 	// Reading must not take the index lock from the user's own git
@@ -79,11 +114,18 @@ func run(ctx context.Context, dir string, stdin io.Reader, args ...string) ([]by
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
+	if debug {
+		start := time.Now()
+		defer func() { log.Printf("git %s: %v", strings.Join(args, " "), time.Since(start)) }()
+	}
 	if err := cmd.Run(); err != nil {
 		return stdout.Bytes(), &Error{Args: args, Stderr: stderr.String(), Err: err}
 	}
 	return stdout.Bytes(), nil
 }
+
+// debug logs every git command with how long it took.
+var debug = os.Getenv("GODIFF_DEBUG") != ""
 
 // Git runs git in the repository and returns what it printed.
 func (r *Repo) Git(args ...string) ([]byte, error) {
@@ -491,7 +533,7 @@ type Contents struct {
 
 // NewContents starts git cat-file for the repository.
 func (r *Repo) NewContents() (*Contents, error) {
-	cmd := exec.Command("git", "cat-file", "--batch")
+	cmd := exec.Command(binary(), "cat-file", "--batch")
 	cmd.Dir = r.Root
 	cmd.Env = append(os.Environ(), "GIT_OPTIONAL_LOCKS=0")
 	stdin, err := cmd.StdinPipe()

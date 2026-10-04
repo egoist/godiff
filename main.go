@@ -14,8 +14,11 @@ import (
 	"path/filepath"
 	"regexp"
 	"runtime"
+	"runtime/pprof"
 	"strings"
 	"sync"
+	"sync/atomic"
+	"time"
 
 	"github.com/egoist/godiff/internal/git"
 	"github.com/egoist/mygo"
@@ -116,7 +119,19 @@ func resolve(dir, p string) string {
 var (
 	welcomeMu  sync.Mutex
 	welcomeWin *mygo.Window
+	// launched is set once the windows of the launch are open.
+	launched atomic.Bool
 )
+
+// noWindows reports whether no window is open.
+func noWindows() bool {
+	windowsMu.Lock()
+	n := len(windows)
+	windowsMu.Unlock()
+	welcomeMu.Lock()
+	defer welcomeMu.Unlock()
+	return n == 0 && (welcomeWin == nil || welcomeWin.IsDestroyed())
+}
 
 // showWelcome shows the window that opens a repository, with why none
 // was.
@@ -181,7 +196,12 @@ func main() {
 	}
 	fromUser := len(args) > 0 || (wd != "/" && wd != "")
 
-	mygo.App.SetName("Godiff")
+	name := "Godiff"
+	if n := os.Getenv("GODIFF_NAME"); n != "" {
+		// Another name runs apart from the installed app, for testing.
+		name = n
+	}
+	mygo.App.SetName(name)
 	if !mygo.App.RequestSingleInstanceLock() {
 		return // the running instance opens the window
 	}
@@ -214,14 +234,43 @@ func main() {
 		}
 	})
 	mygo.App.OnActivate(func(hasVisibleWindows bool) {
-		if !hasVisibleWindows {
+		// A click on the Dock icon with no window open opens the last
+		// repository; the activation of the launch itself does not.
+		if !hasVisibleWindows && launched.Load() && noWindows() {
 			go open(request{dir: state.lastRepository()}, false)
 		}
 	})
+	if path := os.Getenv("GODIFF_CPUPROFILE"); path != "" {
+		// The whole session, written as the app quits.
+		if f, err := os.Create(path); err == nil {
+			pprof.StartCPUProfile(f)
+			mygo.App.OnQuit(func() {
+				pprof.StopCPUProfile()
+				f.Close()
+			})
+		}
+	}
+	if path := os.Getenv("GODIFF_STARTUP_PROFILE"); path != "" {
+		// The first seconds, which draw the window for the first time.
+		if f, err := os.Create(path); err == nil {
+			pprof.StartCPUProfile(f)
+			go func() {
+				time.Sleep(3 * time.Second)
+				pprof.StopCPUProfile()
+				f.Close()
+			}()
+		}
+	}
 	mygo.App.WhenReady(func() {
+		if debugFrames {
+			go watchMainThread()
+		}
 		state.open()
 		cfg.watch()
-		go open(req, fromUser)
+		go func() {
+			open(req, fromUser)
+			launched.Store(true)
+		}()
 	})
 	if err := mygo.App.Run(); err != nil {
 		log.Fatal(err)

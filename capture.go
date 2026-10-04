@@ -3,6 +3,8 @@ package main
 import (
 	"log"
 	"os"
+	"runtime/pprof"
+	"strings"
 	"time"
 
 	"github.com/egoist/mygo"
@@ -18,8 +20,24 @@ func (w *window) captureIfAsked() {
 	go func() {
 		time.Sleep(2500 * time.Millisecond)
 		if setup := os.Getenv("GODIFF_CAPTURE_SETUP"); setup != "" {
+			var prof *os.File
+			if path := os.Getenv("GODIFF_CPUPROFILE"); path != "" {
+				prof, _ = os.Create(path)
+				pprof.StartCPUProfile(prof)
+			}
+			// A commit resolves here, off the main thread, as a click on
+			// the history has it at hand.
+			if ref, ok := strings.CutPrefix(setup, "commit:"); ok {
+				if hash, err := w.repo.Resolve(ref); err == nil {
+					setup = "commit:" + hash
+				}
+			}
 			w.win.Update(func() { w.debugSetup(setup) })
 			time.Sleep(1200 * time.Millisecond)
+			if prof != nil {
+				pprof.StopCPUProfile()
+				prof.Close()
+			}
 		}
 		png, err := w.win.CapturePage()
 		if err != nil {
@@ -33,6 +51,10 @@ func (w *window) captureIfAsked() {
 
 // debugSetup puts the window in a state to capture.
 func (w *window) debugSetup(setup string) {
+	if hash, ok := strings.CutPrefix(setup, "commit:"); ok {
+		w.setSource(source{kind: sourceCommit, ref: hash})
+		return
+	}
 	switch setup {
 	case "unified":
 		w.settings.DiffStyle = "unified"

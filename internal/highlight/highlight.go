@@ -3,7 +3,9 @@
 package highlight
 
 import (
+	"path/filepath"
 	"strings"
+	"sync"
 
 	"github.com/alecthomas/chroma/v2"
 	"github.com/alecthomas/chroma/v2/lexers"
@@ -44,8 +46,69 @@ type Seg struct {
 // MaxBytes bounds the files worth highlighting.
 const MaxBytes = 1 << 20
 
-// Lexer returns the lexer for a file name, nil for plain text.
+var (
+	lexerMu    sync.Mutex
+	lexerCache = map[string]chroma.Lexer{}
+)
+
+// Lexer returns the lexer for a file name, nil for plain text. Lexers are
+// kept by the file's extension, or its name without one: finding one
+// tries the patterns of every lexer.
 func Lexer(name string) chroma.Lexer {
+	base := name
+	if i := strings.LastIndexByte(base, '/'); i >= 0 {
+		base = base[i+1:]
+	}
+	key := base
+	if i := strings.LastIndexByte(base, '.'); i > 0 && !specialName(base) {
+		key = "*" + strings.ToLower(base[i:])
+	}
+	lexerMu.Lock()
+	l, ok := lexerCache[key]
+	lexerMu.Unlock()
+	if ok {
+		return l
+	}
+	l = findLexer(name)
+	lexerMu.Lock()
+	lexerCache[key] = l
+	lexerMu.Unlock()
+	return l
+}
+
+var (
+	specialOnce     sync.Once
+	specialPatterns []string
+)
+
+// specialName reports whether a lexer matches a file name by more than
+// its extension, as CMakeLists.txt or *.d.ts, or the name ends as backups
+// do: its lexer is found by its whole name.
+func specialName(base string) bool {
+	specialOnce.Do(func() {
+		for _, l := range lexers.GlobalLexerRegistry.Lexers {
+			for _, glob := range l.Config().Filenames {
+				ext, ok := strings.CutPrefix(glob, "*.")
+				if !ok || strings.ContainsAny(ext, ".*?[") {
+					specialPatterns = append(specialPatterns, glob)
+				}
+			}
+		}
+	})
+	for _, suffix := range []string{"~", ".bak", ".old", ".orig", ".dpkg-dist", ".dpkg-old", ".ucf-dist", ".ucf-new", ".ucf-old", ".rpmnew", ".rpmorig", ".rpmsave"} {
+		if strings.HasSuffix(base, suffix) {
+			return true
+		}
+	}
+	for _, glob := range specialPatterns {
+		if ok, _ := filepath.Match(glob, base); ok {
+			return true
+		}
+	}
+	return false
+}
+
+func findLexer(name string) chroma.Lexer {
 	l := lexers.Match(name)
 	if l == nil {
 		base := name
