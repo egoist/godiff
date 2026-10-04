@@ -262,6 +262,36 @@ func TestHistory(t *testing.T) {
 	snapshot(t, tt, "history")
 }
 
+func TestHistoryTakesFocus(t *testing.T) {
+	// A clean work tree: the review has no rows to take the focus as the
+	// window opens, so the history shows and takes it.
+	dir := testRepo(t)
+	gitIn(t, dir, "add", ".")
+	gitIn(t, dir, "commit", "-q", "-m", "Second commit")
+	w, tt := newTestWindow(t, dir)
+	if w.tab != 1 || w.historyEl == nil || !w.historyEl.FocusWithin() {
+		t.Fatalf("tab %d: the history did not take the focus", w.tab)
+	}
+	// Down goes to the commit under the uncommitted changes.
+	tt.Key(0, ui.KeyDown)
+	tt.Frame()
+	if w.source.kind != sourceCommit || w.commit == nil || w.commit.Subject != "Second commit" {
+		t.Fatalf("after Down: source %+v", w.source)
+	}
+	if err := tt.Click("First commit"); err != nil {
+		t.Fatal(err)
+	}
+	tt.Frame()
+	tt.Frame()
+	if w.source.kind != sourceCommit || len(w.rows) == 0 {
+		t.Fatalf("source %+v, %d rows", w.source, len(w.rows))
+	}
+	// The commit's rows came, but the history keeps the focus it took.
+	if w.historyEl == nil || !w.historyEl.FocusWithin() {
+		t.Error("the history lost the focus")
+	}
+}
+
 func TestPalette(t *testing.T) {
 	cfg.Update(func(s *Settings) { s.DiffStyle = "split" })
 	w, tt := newTestWindow(t, testRepo(t))

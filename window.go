@@ -109,6 +109,7 @@ type window struct {
 	selFile, selHunk int
 	focusList        bool
 	focusedOnce      bool
+	focusHistory     bool
 	switchedAt       time.Time // when the source last changed, for GODIFF_DEBUG
 	debugPressed     bool
 	// hold keeps the background work of tests in held, to run frames
@@ -365,6 +366,10 @@ func (w *window) setSource(src source) {
 		go probeMainThread(time.Second)
 	}
 	w.commitOpen = false
+	// The review takes the focus as the window opens only: the user, who
+	// chose this source, keeps the focus where they put it, as on the
+	// history.
+	w.focusedOnce = true
 	w.switchTo(src)
 	if src.kind == sourceCommit {
 		for i := range w.history {
@@ -527,8 +532,11 @@ func (w *window) load() {
 				}
 			}
 			if !w.loadedOnce && len(files) == 0 && src.kind != sourceCommit {
-				// Nothing to review: the history shows instead.
+				// Nothing to review: the history shows instead, and takes
+				// the keys in place of the review.
 				w.tab = 1
+				w.focusHistory = w.sidebarShown
+				w.focusedOnce = true
 			}
 			w.loadedOnce = true
 			if err == nil {

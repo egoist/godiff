@@ -605,7 +605,7 @@ func (w *window) historyView(c *ui.Context) {
 		}
 		return entries[i].commit.Subject
 	}
-	focused := w.historyEl != nil && w.historyEl.FocusWithin()
+	focused := w.focusHistory || w.historyEl != nil && w.historyEl.FocusWithin()
 	now := time.Now()
 	list := ui.List(c, &w.historyList, len(entries), func(i int) {
 		e := entries[i]
@@ -655,6 +655,10 @@ func (w *window) historyView(c *ui.Context) {
 		})
 	}).Grow(1).Padding(2, 8).Gap(1).Focusable().FocusRing(false).Label("History")
 	w.historyEl = list
+	if w.focusHistory {
+		list.Focus()
+		w.focusHistory = false
+	}
 	list.Children(func() {
 		if len(entries) == 0 {
 			ui.Text(c, "No matching commits").FontSize(12).TextColor(t.TextMuted).Padding(12)
