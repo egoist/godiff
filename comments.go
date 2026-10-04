@@ -227,5 +227,33 @@ func commentContext(f *fileState, c *comment) string {
 		}
 		return b.String()
 	}
+	return gapContext(f, c)
+}
+
+// gapContext returns the lines around a comment on an unchanged line
+// outside the hunks, one the user expanded, from the file's contents.
+func gapContext(f *fileState, c *comment) string {
+	if !f.canExpand() {
+		return ""
+	}
+	for i := 0; i <= len(f.Hunks); i++ {
+		g := f.gapBefore(i)
+		start := g.newStart
+		if c.side == sideOld {
+			start = g.oldStart
+		}
+		k := c.line - start
+		if k < 0 || k >= g.count {
+			continue
+		}
+		lo, hi := max(k-3, 0), min(k+4, g.count)
+		var b strings.Builder
+		fmt.Fprintf(&b, "@@ -%d,%d +%d,%d @@", g.oldStart+lo, hi-lo, g.newStart+lo, hi-lo)
+		for j := lo; j < hi; j++ {
+			old, new := g.oldStart+j, g.newStart+j
+			fmt.Fprintf(&b, "\n %4s | %s", fmt.Sprintf("%d/%d", old, new), f.contextText(int32(old), int32(new)))
+		}
+		return b.String()
+	}
 	return ""
 }

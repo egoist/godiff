@@ -146,6 +146,7 @@ type window struct {
 	dialogOpen  bool
 	dialogValue string
 	dialogErr   string
+	dialogBusy  bool
 
 	// changed is set when the work tree changed since the last load.
 	changed   bool
@@ -222,6 +223,7 @@ func openWindow(dir string, src source) error {
 	go state.setLastRepository(repo.Root)
 	w.load()
 	w.loadHistory()
+	w.loadUser()
 	go w.watch(stop)
 	w.captureIfAsked()
 	return nil
@@ -646,6 +648,18 @@ func (w *window) loadContents(gen int, oldRev, newRev string, files []*fileState
 }
 
 func (w *window) stale(gen int) bool { return w.genA.Load() != int64(gen) }
+
+// loadUser reads the name of the git user, which comments show, off the
+// main thread: running git takes a while.
+func (w *window) loadUser() {
+	w.background(func() {
+		name := strings.TrimSpace(w.repo.ConfigValue("user.name"))
+		if name == "" {
+			name = strings.TrimSpace(w.repo.ConfigValue("user.email"))
+		}
+		w.update(func() { w.user = name })
+	})
+}
 
 // loadHistory reads the commits of the History tab.
 func (w *window) loadHistory() {

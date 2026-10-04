@@ -102,7 +102,8 @@ go run ./tools/genicon    # render resources/icon.svg to the app icon
 
 `GODIFF_SNAPSHOTS=<dir> go test .` saves PNGs of the views the tests drive, and
 `GODIFF_CAPTURE=<file.png>` makes the app save a picture of its window once
-loaded, then quit.
+loaded, then quit. `GODIFF_DEBUG=1` logs the frames that take more than 4ms to
+build.
 
 The code is in a few parts:
 

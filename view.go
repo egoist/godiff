@@ -2,6 +2,8 @@ package main
 
 import (
 	"errors"
+	"log"
+	"os"
 	"path/filepath"
 	"strings"
 	"time"
@@ -11,6 +13,14 @@ import (
 )
 
 func (w *window) view(c *ui.Context) {
+	if debugFrames {
+		start := time.Now()
+		defer func() {
+			if d := time.Since(start); d > 4*time.Millisecond {
+				log.Printf("slow view: %v (rows %d, comments %d)", d, len(w.rows), len(w.comments))
+			}
+		}()
+	}
 	t := c.Theme()
 	pal := paletteFor(t)
 	w.now = c.Now()
@@ -55,6 +65,9 @@ func (w *window) view(c *ui.Context) {
 		w.focusList = false
 	}
 }
+
+// debugFrames logs the views that take long to build.
+var debugFrames = os.Getenv("GODIFF_DEBUG") != ""
 
 // toolbar is the bar along the top of the review, which drags the window.
 func (w *window) toolbar(c *ui.Context, pal *palette) {

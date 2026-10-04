@@ -270,22 +270,33 @@ func (w *window) sourceDialog(c *ui.Context) {
 			w.dialogErr = "Enter a " + strings.ToLower(label) + "."
 			return
 		}
-		switch w.dialog {
-		case dialogCommit:
-			hash, err := w.repo.Resolve(v)
-			if err != nil {
-				w.dialogErr = err.Error()
-				return
-			}
-			w.setSource(source{kind: sourceCommit, ref: hash})
-		case dialogBranch:
-			if _, err := w.repo.Resolve(v); err != nil {
-				w.dialogErr = "Branch \"" + v + "\" does not exist in this repository."
-				return
-			}
-			w.setSource(source{kind: sourceBranch, ref: v})
+		if w.dialogBusy {
+			return
 		}
-		w.dialogOpen = false
+		// git answers off the main thread.
+		kind := w.dialog
+		w.dialogBusy = true
+		w.background(func() {
+			hash, err := w.repo.Resolve(v)
+			w.update(func() {
+				w.dialogBusy = false
+				if !w.dialogOpen || w.dialog != kind {
+					return
+				}
+				switch {
+				case err != nil && kind == dialogBranch:
+					w.dialogErr = "Branch \"" + v + "\" does not exist in this repository."
+				case err != nil:
+					w.dialogErr = err.Error()
+				case kind == dialogCommit:
+					w.dialogOpen = false
+					w.setSource(source{kind: sourceCommit, ref: hash})
+				default:
+					w.dialogOpen = false
+					w.setSource(source{kind: sourceBranch, ref: v})
+				}
+			})
+		})
 	}
 	ui.Modal(c, &w.dialogOpen, func() {
 		ui.Column(c).Width(420).Gap(14).Children(func() {
@@ -302,7 +313,11 @@ func (w *window) sourceDialog(c *ui.Context) {
 				if ui.Button(c, "Cancel").Clicked() {
 					w.dialogOpen = false
 				}
-				if ui.PrimaryButton(c, "Open").Clicked() {
+				label := "Open"
+				if w.dialogBusy {
+					label = "Opening…"
+				}
+				if ui.PrimaryButton(c, label).Disabled(w.dialogBusy).Clicked() {
 					open()
 				}
 			})

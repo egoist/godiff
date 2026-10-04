@@ -666,16 +666,11 @@ func (w *window) commentRow(c *ui.Context, pal *palette, f *fileState, cm *comme
 	})
 }
 
-// userName is the name of the git user, for comments.
+// userName is the name of the git user, for comments, which loadUser
+// reads as the window opens.
 func (w *window) userName() string {
 	if w.user == "" {
-		w.user = strings.TrimSpace(w.repo.ConfigValue("user.name"))
-		if w.user == "" {
-			w.user = strings.TrimSpace(w.repo.ConfigValue("user.email"))
-		}
-		if w.user == "" {
-			w.user = "Git user"
-		}
+		return "Git user"
 	}
 	return w.user
 }

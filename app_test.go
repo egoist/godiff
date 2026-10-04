@@ -97,6 +97,7 @@ func newTestWindow(t *testing.T, dir string) (*window, *ui.Tester) {
 	w.sidebarShown, w.sidebarWidth = true, sidebarDefault
 	w.load()
 	w.loadHistory()
+	w.loadUser()
 	tt := ui.NewTester(w.view, 1280, 860)
 	tt.Frame()
 	return w, tt

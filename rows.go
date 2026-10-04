@@ -300,7 +300,8 @@ func (w *window) appendComments(rows []row, idx int32, f *fileState, l *diff.Lin
 		if cm.path != f.Path {
 			continue
 		}
-		if (cm.side == sideOld && l.Kind == diff.Del && cm.line == l.Old) ||
+		// Unchanged lines take comments on either side.
+		if (cm.side == sideOld && l.Kind != diff.Add && cm.line == l.Old) ||
 			(cm.side == sideNew && l.Kind != diff.Del && cm.line == l.New) {
 			rows = append(rows, row{kind: rowComment, file: idx, comment: cm})
 		}
