@@ -217,19 +217,27 @@ func (w *window) sidebar(c *ui.Context) {
 	pal := paletteFor(t)
 	bar := c.TitleBar()
 	sidebarRight := w.settings.SidebarPosition == "right"
-	left, right := bar.Left+6, float32(10)
+	left, right := max(bar.Left+6, 10), float32(10)
 	if sidebarRight {
-		left, right = 10, bar.Right+6
+		left, right = 10, max(bar.Right+6, 10)
 	}
 	ui.Column(c).Width(w.sidebarWidth).Shrink(0).Background(w.sidebarBg(t)).Children(func() {
 		// The title bar, under the window controls: the views of the
-		// sidebar and its toggle, centered on the window controls.
+		// sidebar and its toggle, centered on the window controls. They
+		// keep to the right, clear of the traffic lights, on macOS, and
+		// to the left elsewhere, where the window buttons are on the right.
+		mac := runtime.GOOS == "darwin"
 		ui.Row(c).Height(titleBarHeight).Padding(0, right, 0, left).Gap(6).DragWindow().Children(func() {
-			ui.Spacer(c)
+			if mac {
+				ui.Spacer(c)
+			}
 			if w.tabControl(c) {
 				w.commitOpen = false
 			}
 			w.sidebarToggle(c)
+			if !mac {
+				ui.Spacer(c)
+			}
 		})
 		ui.Column(c).Padding(2, 10, 8).Children(func() {
 			if w.tab == 0 {

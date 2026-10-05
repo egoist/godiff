@@ -27,8 +27,10 @@ func (w *window) view(c *ui.Context) {
 	t := c.Theme()
 	pal := paletteFor(t)
 	w.now = c.Now()
-	// The window shows the sidebar's material where nothing is drawn.
-	c.Root().Background(ui.Transparent)
+	// On macOS, the window shows the sidebar's material where nothing is
+	// drawn. Elsewhere it would show black, as under the translucent edge
+	// of the sidebar, so the sidebar's color is drawn there instead.
+	c.Root().Background(w.sidebarBg(t))
 	w.shortcuts(c)
 
 	ui.Row(c).Fill().AlignItems(ui.Stretch).Children(func() {
