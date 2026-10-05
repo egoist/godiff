@@ -10,6 +10,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/egoist/godiff/internal/proc"
 	"github.com/egoist/mygo"
 )
 
@@ -54,6 +55,8 @@ func openEditor(command, repo, file string, line int) error {
 		}
 		candidates = append(candidates, args)
 	}
+	// The user's command may be a console editor, which needs its window.
+	custom := len(candidates)
 	target := file
 	if lineText != "" {
 		target += ":" + lineText
@@ -64,8 +67,11 @@ func openEditor(command, repo, file string, line int) error {
 	if runtime.GOOS == "darwin" {
 		candidates = append(candidates, []string{"open", "-a", "Visual Studio Code", file}, []string{"open", "-t", file})
 	}
-	for _, args := range candidates {
+	for i, args := range candidates {
 		cmd := exec.Command(args[0], args[1:]...)
+		if i >= custom {
+			proc.HideConsole(cmd)
+		}
 		if err := cmd.Run(); err == nil {
 			return nil
 		}

@@ -21,6 +21,7 @@ import (
 	"time"
 
 	"github.com/egoist/godiff/internal/diff"
+	"github.com/egoist/godiff/internal/proc"
 )
 
 // EmptyTree is the hash of git's empty tree, the base of a repository
@@ -106,6 +107,7 @@ func binary() string {
 
 func run(ctx context.Context, dir string, stdin io.Reader, args ...string) ([]byte, error) {
 	cmd := exec.CommandContext(ctx, binary(), args...)
+	proc.HideConsole(cmd)
 	cmd.Dir = dir
 	cmd.Stdin = stdin
 	// Reading must not take the index lock from the user's own git
@@ -534,6 +536,7 @@ type Contents struct {
 // NewContents starts git cat-file for the repository.
 func (r *Repo) NewContents() (*Contents, error) {
 	cmd := exec.Command(binary(), "cat-file", "--batch")
+	proc.HideConsole(cmd)
 	cmd.Dir = r.Root
 	cmd.Env = append(os.Environ(), "GIT_OPTIONAL_LOCKS=0")
 	stdin, err := cmd.StdinPipe()
