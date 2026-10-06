@@ -422,10 +422,14 @@ func (w *window) openPullOnGitHub() {
 	}
 }
 
-// agentHint names the agent that reviews.
+// agentHint names the agent that reviews, and the model chosen.
 func (w *window) agentHint() string {
-	if a, ok := agent.ByName(w.settings.AIAgent); ok {
-		return a.Label
+	a, ok := agent.ByName(w.settings.AIAgent)
+	if !ok {
+		return "Claude Code, Codex, OpenCode or Pi"
 	}
-	return "Claude Code, Codex, OpenCode or Pi"
+	if w.settings.AIModel != "" {
+		return a.Label + " · " + w.settings.AIModel
+	}
+	return a.Label
 }

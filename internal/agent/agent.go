@@ -354,16 +354,37 @@ func fit(a *Analysis, files []File) (*Analysis, error) {
 	for _, f := range files {
 		known[f.Path] = true
 	}
+	// clean finds a file of the change by its path, also as an absolute
+	// one, as OpenCode's explore agent gives them.
+	clean := func(p string) string {
+		p = strings.TrimPrefix(strings.TrimSpace(p), "./")
+		if known[p] || !strings.HasPrefix(p, "/") {
+			return p
+		}
+		found := p
+		for k := range known {
+			if strings.HasSuffix(p, "/"+k) && (found == p || len(k) > len(found)) {
+				found = k
+			}
+		}
+		return found
+	}
 	placed := map[string]bool{}
 	var groups []Group
 	for _, g := range a.Groups {
 		var paths []string
 		for _, p := range g.FilePaths {
-			p = strings.TrimPrefix(strings.TrimSpace(p), "./")
+			p = clean(p)
 			if known[p] && !placed[p] {
 				placed[p] = true
 				paths = append(paths, p)
 			}
+		}
+		for i := range g.FileNotes {
+			g.FileNotes[i].Path = clean(g.FileNotes[i].Path)
+		}
+		for i := range g.LineNotes {
+			g.LineNotes[i].Path = clean(g.LineNotes[i].Path)
 		}
 		g.FileNotes = slices.DeleteFunc(g.FileNotes, func(n FileNote) bool { return !known[n.Path] || strings.TrimSpace(n.Text) == "" })
 		g.LineNotes = slices.DeleteFunc(g.LineNotes, func(n LineNote) bool {

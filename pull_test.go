@@ -412,3 +412,51 @@ func TestParsePullArgs(t *testing.T) {
 		t.Errorf("another repository: %v", err)
 	}
 }
+
+func TestAIModelMenu(t *testing.T) {
+	w, tt := newTestWindow(t, testRepo(t))
+	// The models OpenCode lists, as if it had listed them.
+	modelsFound.Lock()
+	modelsFound.byAgent = map[string]*agentModels{"opencode": {done: true, fetchedAt: time.Now(), def: "deepseek/deepseek-flash", models: []agent.Model{
+		{ID: "deepseek/deepseek-flash", Label: "deepseek-flash", Provider: "deepseek"},
+		{ID: "vercel/anthropic/claude-sonnet-4.6", Label: "anthropic/claude-sonnet-4.6", Provider: "vercel"},
+		{ID: "vercel/bfl/flux-3-image", Label: "bfl/flux-3-image", Provider: "vercel"},
+	}}}
+	modelsFound.Unlock()
+	t.Cleanup(func() {
+		modelsFound.Lock()
+		modelsFound.byAgent = nil
+		modelsFound.Unlock()
+	})
+	withSettings(t, func(s *Settings) { s.AIAgent = "opencode" })
+	w.settings = cfg.Get()
+	w.chooseGrouping(groupAI)
+	tt.Frame()
+	if err := tt.Click("Default Model"); err != nil {
+		t.Fatalf("%v in %q", err, tt.Texts())
+	}
+	if got, want := tt.Menu(), []string{"Default (deepseek/deepseek-flash)", "-", "deepseek", "vercel"}; !slices.Equal(got, want) {
+		t.Fatalf("menu %q, want %q", got, want)
+	}
+	if err := tt.ChooseMenuItem("vercel", "anthropic", "claude-sonnet-4.6"); err != nil {
+		t.Fatal(err)
+	}
+	if got := cfg.Get().AIModel; got != "vercel/anthropic/claude-sonnet-4.6" {
+		t.Fatalf("model %q", got)
+	}
+	w.settings = cfg.Get()
+	tt.Frame()
+	if !tt.HasText("claude-sonnet-4.6") {
+		t.Errorf("no model on the button in %q", tt.Texts())
+	}
+	// Choosing another agent forgets the model of the one before.
+	if err := tt.Click("OpenCode"); err != nil {
+		t.Fatal(err)
+	}
+	if err := tt.ChooseMenuItem("Pi"); err != nil {
+		t.Fatal(err)
+	}
+	if got := cfg.Get().AIModel; got != "" {
+		t.Errorf("model %q after choosing another agent", got)
+	}
+}

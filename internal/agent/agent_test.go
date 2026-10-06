@@ -82,7 +82,10 @@ func fakeAgent(t *testing.T, name, out string) string {
 	os.WriteFile(filepath.Join(dir, "out"), []byte(out), 0o644)
 	script := `#!/bin/sh
 dir=$(dirname "$0")
+# What the agent prints for another command, as its version.
+if [ -f "$dir/cmd-$1" ]; then cat "$dir/cmd-$1"; exit 0; fi
 printf '%s\n' "$@" > "$dir/args"
+env > "$dir/env"
 cat > "$dir/stdin"
 last=""
 while [ $# -gt 0 ]; do
@@ -108,11 +111,16 @@ func TestRun(t *testing.T) {
 	json.Unmarshal([]byte(answer), &structured)
 	fenced := "```json\n" + answer + "\n```"
 	for _, tc := range []struct {
+		name     string
 		agent    string
 		out      string
 		last     string // what codex writes to its -o file
+		cmds     map[string]string
+		state    string // OpenCode's model.json
 		model    string
 		args     []string
+		noArgs   []string
+		env      string
 		progress string
 	}{
 		{
@@ -136,8 +144,25 @@ func TestRun(t *testing.T) {
 			agent: "opencode",
 			out: jsonLine(map[string]any{"type": "tool_use", "part": map[string]any{"type": "tool", "tool": "grep", "state": map[string]any{"input": map[string]any{"pattern": "Hello"}}}}) +
 				jsonLine(map[string]any{"type": "text", "part": map[string]any{"type": "text", "text": fenced}}),
-			args:     []string{"run", "--format", "json"},
+			cmds:     map[string]string{"--version": "1.0.150\n", "debug": `{"model":"anthropic/claude-sonnet-4-5"}`},
+			model:    "anthropic/claude-sonnet-4-5",
+			args:     []string{"run", "--format", "json", "--model", "anthropic/claude-sonnet-4-5"},
+			noArgs:   []string{"--agent"},
+			env:      `OPENCODE_CONFIG_CONTENT={"permission":{"edit":"deny","bash":"deny","webfetch":"deny"}}`,
 			progress: `Searching for "Hello"`,
+		},
+		{
+			// OpenCode 2 runs the explore agent, with the model last used
+			// in OpenCode and its variant, and paths given whole.
+			name:  "opencode2",
+			agent: "opencode",
+			out: jsonLine(map[string]any{"type": "step_start"}) + jsonLine(map[string]any{"type": "step_start"}) +
+				jsonLine(map[string]any{"type": "text", "part": map[string]any{"type": "text", "text": strings.ReplaceAll(fenced, `"src/`, `"/repo/src/`)}}),
+			cmds:     map[string]string{"--version": "opencode v2.0.22\n", "debug": `[{"type":"document","path":"/home/opencode.jsonc","info":{"lsp":false}}]`},
+			state:    `{"recent":[{"providerID":"deepseek","modelID":"deepseek-flash"}],"variant":{"deepseek/deepseek-flash":"max"}}`,
+			model:    "deepseek/deepseek-flash#max",
+			args:     []string{"run", "--format", "json", "--agent", "explore", "--model", "deepseek/deepseek-flash#max"},
+			progress: "Retrying…",
 		},
 		{
 			agent: "pi",
@@ -148,10 +173,22 @@ func TestRun(t *testing.T) {
 			progress: "Reading greet.go",
 		},
 	} {
-		t.Run(tc.agent, func(t *testing.T) {
+		if tc.name == "" {
+			tc.name = tc.agent
+		}
+		t.Run(tc.name, func(t *testing.T) {
 			dir := fakeAgent(t, tc.agent, tc.out)
 			if tc.last != "" {
 				os.WriteFile(filepath.Join(dir, "last"), []byte(tc.last), 0o644)
+			}
+			for cmd, out := range tc.cmds {
+				os.WriteFile(filepath.Join(dir, "cmd-"+cmd), []byte(out), 0o644)
+			}
+			stateDir := t.TempDir()
+			t.Setenv("XDG_STATE_HOME", stateDir)
+			if tc.state != "" {
+				os.MkdirAll(filepath.Join(stateDir, "opencode"), 0o755)
+				os.WriteFile(filepath.Join(stateDir, "opencode", "model.json"), []byte(tc.state), 0o644)
 			}
 			a, _ := ByName(tc.agent)
 			var steps []string
@@ -170,6 +207,15 @@ func TestRun(t *testing.T) {
 				if !slices.Contains(strings.Split(string(args), "\n"), want) {
 					t.Errorf("no %q in the arguments:\n%s", want, args)
 				}
+			}
+			for _, not := range tc.noArgs {
+				if slices.Contains(strings.Split(string(args), "\n"), not) {
+					t.Errorf("%q in the arguments:\n%s", not, args)
+				}
+			}
+			env, _ := os.ReadFile(filepath.Join(dir, "env"))
+			if hasConfig := strings.Contains(string(env), "OPENCODE_CONFIG_CONTENT="); tc.env != "" && !strings.Contains(string(env), tc.env) || tc.env == "" && hasConfig {
+				t.Errorf("environment: want %q, has a config: %v", tc.env, hasConfig)
 			}
 			stdin, _ := os.ReadFile(filepath.Join(dir, "stdin"))
 			if !strings.Contains(string(stdin), "---MANIFEST---") {

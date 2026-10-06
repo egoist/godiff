@@ -1,6 +1,7 @@
 package main
 
 import (
+	"cmp"
 	"context"
 	"crypto/sha1"
 	"encoding/hex"
@@ -277,6 +278,7 @@ func (w *window) summaryCard(c *ui.Context, pal *palette) *ui.Element {
 			if st.result == nil && !st.running && st.err == "" {
 				// Offered: nothing runs until asked.
 				w.agentMenu(c)
+				w.modelMenu(c)
 				if ui.PrimaryButton(c, "Review with AI").Height(26).Clicked() {
 					w.runAnalysis()
 				}
@@ -299,6 +301,7 @@ func (w *window) summaryCard(c *ui.Context, pal *palette) *ui.Element {
 				return
 			}
 			w.agentMenu(c)
+			w.modelMenu(c)
 			label := "Review Again"
 			if st.result == nil {
 				label = "Try Again"
@@ -399,6 +402,189 @@ func (w *window) agentMenu(c *ui.Context) {
 	}).Height(26).Tooltip("The agent that reviews")
 }
 
+// reviewAgent is the agent that reviews: the settings', else the first
+// installed, once known.
+func (w *window) reviewAgent() (agent.Agent, bool) {
+	if a, ok := agent.ByName(w.settings.AIAgent); ok {
+		return a, true
+	}
+	if installed, _ := installedAgents(); len(installed) > 0 {
+		return installed[0], true
+	}
+	return agent.Agent{}, false
+}
+
+// modelMenu chooses the model the agent reviews with, among those it
+// lists.
+func (w *window) modelMenu(c *ui.Context) {
+	a, ok := w.reviewAgent()
+	if !ok {
+		return
+	}
+	list := modelsOf(a, w.repo.Root)
+	chosen := w.settings.AIModel
+	label := "Default Model"
+	if chosen != "" {
+		label = modelName(chosen, list.models)
+	}
+	setModel := func(id string) { cfg.Update(func(s *Settings) { s.AIModel = id }) }
+	ui.MenuButton(c, label, func(m *ui.Menu) {
+		def := "Default"
+		if list.def != "" {
+			def += " (" + list.def + ")"
+		}
+		if m.Item(def).Checked(chosen == "").Chosen() {
+			setModel("")
+		}
+		m.Separator()
+		if chosen != "" && !slices.ContainsFunc(list.models, func(md agent.Model) bool { return md.ID == chosen }) {
+			// Named in the config file.
+			m.Item(chosen).Checked(true)
+		}
+		switch {
+		case !list.done:
+			m.Item("Loading models…").Disabled(true)
+			return
+		case list.err != nil:
+			msg, _, _ := strings.Cut(strings.TrimSpace(errorText(list.err)), "\n")
+			if len(msg) > 80 {
+				msg = msg[:80] + "…"
+			}
+			m.Item(msg).Disabled(true)
+			return
+		}
+		modelItems(m, list.models, func(m *ui.Menu, label, id string) {
+			if m.Item(label).Checked(chosen == id).Chosen() {
+				setModel(id)
+			}
+		})
+	}).Height(26).Tooltip("The model that reviews: " + cmp.Or(chosen, cmp.Or(list.def, a.Label+"'s default")))
+}
+
+// modelName is a model's name on its button: its label, without its
+// provider's.
+func modelName(id string, models []agent.Model) string {
+	name := id
+	if i := slices.IndexFunc(models, func(md agent.Model) bool { return md.ID == id }); i >= 0 {
+		name = models[i].Label
+	}
+	if i := strings.LastIndexByte(name, '/'); i >= 0 {
+		name = name[i+1:]
+	}
+	return name
+}
+
+// modelItems adds models to a menu: in a submenu for each provider, and in
+// one for each maker of the models of the providers that serve others',
+// as vercel/anthropic/claude-sonnet-4.6.
+func modelItems(m *ui.Menu, models []agent.Model, item func(m *ui.Menu, label, id string)) {
+	vendor := func(md agent.Model) string {
+		if v, _, ok := strings.Cut(md.Label, "/"); ok {
+			return v
+		}
+		return ""
+	}
+	for _, p := range groupModels(models, func(md agent.Model) string { return md.Provider }) {
+		if p.key == "" {
+			for _, md := range p.models {
+				item(m, md.Label, md.ID)
+			}
+			continue
+		}
+		m.Submenu(p.key, func(m *ui.Menu) {
+			for _, v := range groupModels(p.models, vendor) {
+				if v.key == "" {
+					for _, md := range v.models {
+						item(m, md.Label, md.ID)
+					}
+					continue
+				}
+				m.Submenu(v.key, func(m *ui.Menu) {
+					for _, md := range v.models {
+						item(m, strings.TrimPrefix(md.Label, v.key+"/"), md.ID)
+					}
+				})
+			}
+		})
+	}
+}
+
+type modelGroup struct {
+	key    string
+	models []agent.Model
+}
+
+// groupModels groups models by a key, in the order of their first.
+func groupModels(models []agent.Model, key func(agent.Model) string) []modelGroup {
+	var groups []modelGroup
+	at := map[string]int{}
+	for _, md := range models {
+		k := key(md)
+		i, ok := at[k]
+		if !ok {
+			i = len(groups)
+			at[k] = i
+			groups = append(groups, modelGroup{key: k})
+		}
+		groups[i].models = append(groups[i].models, md)
+	}
+	return groups
+}
+
+// agentModels are the models of an agent, as it listed them.
+type agentModels struct {
+	models []agent.Model
+	// def is the model the agent uses when none is chosen, "" when it does
+	// not tell.
+	def       string
+	err       error
+	done      bool
+	fetching  bool
+	fetchedAt time.Time
+}
+
+var modelsFound struct {
+	sync.Mutex
+	byAgent map[string]*agentModels
+}
+
+// modelsOf returns the models of an agent as last listed: they are
+// listed off the main thread, when first asked for and again once a few
+// minutes old, as providers come and go.
+func modelsOf(a agent.Agent, dir string) agentModels {
+	modelsFound.Lock()
+	defer modelsFound.Unlock()
+	if modelsFound.byAgent == nil {
+		modelsFound.byAgent = map[string]*agentModels{}
+	}
+	list := modelsFound.byAgent[a.Name]
+	if list == nil {
+		list = &agentModels{}
+		modelsFound.byAgent[a.Name] = list
+	}
+	if detectAgents && !list.fetching && (!list.done || time.Since(list.fetchedAt) > 5*time.Minute) {
+		list.fetching = true
+		go func() {
+			models, def, err := agent.Models(context.Background(), a, dir)
+			modelsFound.Lock()
+			list.models, list.def, list.err = models, def, err
+			list.done, list.fetching, list.fetchedAt = true, false, time.Now()
+			modelsFound.Unlock()
+			invalidateWindows()
+		}()
+	}
+	return *list
+}
+
+// invalidateWindows builds every window again.
+func invalidateWindows() {
+	windowsMu.Lock()
+	for _, w := range windows {
+		w.invalidate()
+	}
+	windowsMu.Unlock()
+}
+
 // detectAgents is set by the app: tests look for no agents.
 var detectAgents bool
 
@@ -420,11 +606,7 @@ func installedAgents() ([]agent.Agent, bool) {
 			agentsFound.Lock()
 			agentsFound.list, agentsFound.done = list, true
 			agentsFound.Unlock()
-			windowsMu.Lock()
-			for _, w := range windows {
-				w.invalidate()
-			}
-			windowsMu.Unlock()
+			invalidateWindows()
 		}()
 	}
 	return agentsFound.list, agentsFound.done

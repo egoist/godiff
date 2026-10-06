@@ -42,7 +42,9 @@ dark mode, menus and vibrancy.
   own: it summarizes them, groups the files by intent, and notes the lines
   that deserve attention, marking what needs care. It runs read-only, with
   the agent's own sign-in, and its review is kept until you ask for
-  another.
+  another. Choose the agent and the model in the review's card, among
+  those the agent lists, of any of its providers; by default OpenCode
+  reviews with the model it starts with itself.
 - **Find in diffs** (<kbd>⌘F</kbd>), a **file filter** (<kbd>⌘P</kbd>) and a
   **command bar** (<kbd>⌘K</kbd>).
 - Image previews of changed pictures, a file tree with change counts and
@@ -104,7 +106,7 @@ with codiff's names, and apply to open windows as the file changes:
     "editorCommand": "",           // e.g. "zed {file}:{line}"
     "githubToken": "",             // empty uses the GitHub CLI's (gh auth login)
     "aiAgent": "",                 // claude, codex, opencode or pi; empty is the first installed
-    "aiModel": "",                 // e.g. "sonnet"; empty is the agent's default
+    "aiModel": "",                 // e.g. "sonnet" or "deepseek/deepseek-flash"; empty is the agent's default
     "reviewCommentsPrefix": "# Address these Review Comments",
     "sidebarPosition": "left",     // or "right"
     "showWhitespace": false,

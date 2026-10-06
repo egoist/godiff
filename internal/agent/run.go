@@ -95,12 +95,21 @@ func Run(ctx context.Context, a Agent, req Request, progress func(string)) (*Ana
 		}
 		args = append(args, "-")
 	case "opencode":
-		// The default agent with the tools that change anything denied:
-		// the plan agent will not read files.
-		env = append(env, `OPENCODE_CONFIG_CONTENT={"permission":{"edit":"deny","bash":"deny","webfetch":"deny"}}`)
 		args = []string{"run", "--format", "json"}
-		if req.Model != "" {
-			args = append(args, "--model", req.Model)
+		v2 := opencodeMajor(ctx, bin) >= 2
+		if v2 {
+			// OpenCode 2 runs on its background service, which a config
+			// in the environment does not reach, and would keep if it
+			// started it: its explore agent may only read and search.
+			args = append(args, "--agent", "explore")
+		} else {
+			// The default agent with the tools that change anything
+			// denied: the plan agent will not read files.
+			env = append(env, `OPENCODE_CONFIG_CONTENT={"permission":{"edit":"deny","bash":"deny","webfetch":"deny"}}`)
+		}
+		if model := opencodeModel(ctx, bin, req.Dir, req.Model, v2); model != "" {
+			args = append(args, "--model", model)
+			r.model = model
 		}
 	case "pi":
 		stdin = user
@@ -189,6 +198,8 @@ type runner struct {
 	structured json.RawMessage
 	lastFile   string
 	err        string
+	// lastEvent is the type of the event read last.
+	lastEvent string
 }
 
 func (r *runner) line(data []byte) {
@@ -313,7 +324,19 @@ func (r *runner) opencode(data []byte) {
 	if json.Unmarshal(data, &ev) != nil {
 		return
 	}
+	// A step that starts again with nothing done is one that failed:
+	// OpenCode retries it a while before it gives up.
+	retry := ev.Type == "step_start" && r.lastEvent == "step_start"
+	r.lastEvent = ev.Type
 	switch ev.Type {
+	case "step_start":
+		if retry {
+			r.progress("Retrying…")
+		} else {
+			r.progress("Thinking…")
+		}
+	case "reasoning":
+		r.progress("Thinking…")
 	case "tool_use":
 		r.progress(toolStep(ev.Part.Tool, ev.Part.State.Input))
 	case "text":

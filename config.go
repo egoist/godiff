@@ -27,8 +27,10 @@ type Settings struct {
 	// the GitHub CLI is used.
 	GithubToken string `json:"githubToken"`
 	// AIAgent reviews changes: claude, codex, opencode or pi, or empty for
-	// the first installed. AIModel is the model it uses, empty for its own
-	// default.
+	// the first installed. AIModel is the model it uses, of any of its
+	// providers, as the AI Review card chooses it; empty for its own
+	// default, which for OpenCode is the one its own interface starts
+	// with.
 	AIAgent              string `json:"aiAgent"`
 	AIModel              string `json:"aiModel"`
 	ReviewCommentsPrefix string `json:"reviewCommentsPrefix"`
