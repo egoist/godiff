@@ -519,7 +519,10 @@ func (w *window) fileTree(c *ui.Context) {
 			}
 			f := w.files[n.file]
 			viewed := w.isViewed(f)
-			ui.Icon(c, iconFile).FontSize(14).TextColor(muted)
+			icon := fileIcon(c, f, 14)
+			if selected && focused {
+				icon.TextColor(muted)
+			}
 			name := ui.Text(c, n.name).FontSize(13).SingleLine().Grow(1).Shrink(1).MinWidth(0)
 			if viewed && !(selected && focused) {
 				name.TextColor(t.TextMuted)

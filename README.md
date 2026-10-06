@@ -47,6 +47,8 @@ dark mode, menus and vibrancy.
   **command bar** (<kbd>⌘K</kbd>).
 - Image previews of changed pictures, a file tree with change counts and
   status letters, and a banner when the work tree changes.
+- **File icons** of each kind of file, in its color, as codiff's file tree
+  draws them: the icons of [@pierre/trees](https://www.npmjs.com/package/@pierre/trees).
 
 ## Usage
 
@@ -125,6 +127,7 @@ go tool mygo dev          # the app, rebuilt as you edit
 go test ./...             # including the views, run without a window
 go tool mygo build        # Godiff.app and a disk image in build/
 go run ./tools/genicon    # render resources/icon.svg to the app icon
+go run ./tools/genfileicons <@pierre/trees package>  # update the file icons
 ```
 
 `GODIFF_SNAPSHOTS=<dir> go test .` saves PNGs of the views the tests drive, and

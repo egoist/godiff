@@ -2,6 +2,7 @@ package main
 
 import (
 	"github.com/egoist/godiff/internal/diff"
+	"github.com/egoist/godiff/internal/fileicon"
 	"github.com/egoist/godiff/internal/github"
 	"github.com/egoist/godiff/internal/highlight"
 	"github.com/egoist/mygo/ui"
@@ -36,6 +37,21 @@ type fileState struct {
 	spans map[spanKey][]ui.Span
 	// group is the index of the file's group, -1 for none.
 	group int
+	// kind is the icon of the file's kind, once drawn.
+	kind *fileicon.Icon
+}
+
+// fileIcon draws the icon of a file's kind in its color, as codiff's
+// file tree does; a folder for an untracked directory.
+func fileIcon(c *ui.Context, f *fileState, size float32) *ui.Element {
+	t := c.Theme()
+	if f.Directory {
+		return ui.Icon(c, iconFolder).FontSize(size).TextColor(t.TextMuted).Shrink(0)
+	}
+	if f.kind == nil {
+		f.kind = fileicon.For(f.Path)
+	}
+	return ui.Icon(c, f.kind.SVG).FontSize(size).TextColor(f.kind.Color(t.Dark)).Shrink(0)
 }
 
 // spanKey identifies the code of a line on one side, in the light or the

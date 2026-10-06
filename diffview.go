@@ -232,6 +232,7 @@ func (w *window) fileHeader(c *ui.Context, pal *palette, idx int, f *fileState) 
 			if collapsed || viewed {
 				pathColor = t.TextMuted
 			}
+			fileIcon(c, f, 15)
 			ui.Column(c).Grow(1).Shrink(1).MinWidth(0).Gap(1).Children(func() {
 				ui.RichText(c,
 					ui.Span{Text: f.Dir(), Color: t.TextMuted},

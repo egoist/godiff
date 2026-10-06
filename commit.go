@@ -159,6 +159,7 @@ func (w *window) commitView(c *ui.Context) {
 						}
 						row.Children(func() {
 							checkMark(c, pal, on, false)
+							fileIcon(c, f, 14)
 							ui.RichText(c,
 								ui.Span{Text: f.Dir(), Color: t.TextMuted},
 								ui.Span{Text: f.Name()},
