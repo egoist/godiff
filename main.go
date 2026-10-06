@@ -196,25 +196,21 @@ func closeWelcome() {
 // open opens a window for a command line, or the welcome window when it
 // names no repository.
 func open(req request, fromUser bool) {
-	err := openWindow(req.dir, req.src)
-	if err == nil {
-		return
-	}
 	if !fromUser {
-		// Opened from Finder: the repository of last time.
-		if last := state.lastRepository(); last != "" {
-			if openWindow(last, source{}) == nil {
-				return
-			}
+		// Started from Finder or the Dock: the repository of last time.
+		if recent := state.recent(); len(recent) > 0 && openWindow(recent[0], source{}) == nil {
+			return
 		}
 	}
-	showWelcome(err)
+	if err := openWindow(req.dir, req.src); err != nil {
+		showWelcome(err)
+	}
 }
 
 func main() {
 	wd, _ := os.Getwd()
-	args, wd := takeCwd(os.Args[1:], wd)
-	req, err := parseArgs(args, wd)
+	args, dir := takeCwd(os.Args[1:], wd)
+	req, err := parseArgs(args, dir)
 	if err == errHelp {
 		fmt.Print(usage)
 		return
@@ -223,7 +219,9 @@ func main() {
 		fmt.Fprintln(os.Stderr, "godiff:", err)
 		os.Exit(2)
 	}
-	fromUser := len(args) > 0 || (wd != "/" && wd != "")
+	// The command line names a repository, unless the app was started from
+	// Finder or the Dock, in /, or by `mygo dev`, in its project.
+	fromUser := len(args) > 0 || dir != wd || (wd != "/" && wd != "" && os.Getenv("MYGO_ENV") != "development")
 
 	name := "Godiff"
 	if n := os.Getenv("GODIFF_NAME"); n != "" {
@@ -249,6 +247,7 @@ func main() {
 	mygo.App.OnOpenFile(func(path string) {
 		go open(request{dir: path}, true)
 	})
+	state.open() // before the menu, which lists the recent repositories
 	applyTheme(cfg.Get())
 	mygo.App.SetMenu(buildMenu())
 	cfg.OnChange(func(s Settings) {
@@ -266,7 +265,7 @@ func main() {
 		// A click on the Dock icon with no window open opens the last
 		// repository; the activation of the launch itself does not.
 		if !hasVisibleWindows && launched.Load() && noWindows() {
-			go open(request{dir: state.lastRepository()}, false)
+			go open(request{dir: wd}, false)
 		}
 	})
 	if path := os.Getenv("GODIFF_CPUPROFILE"); path != "" {
@@ -295,7 +294,6 @@ func main() {
 		if debugFrames {
 			go watchMainThread()
 		}
-		state.open()
 		cfg.watch()
 		go func() {
 			open(req, fromUser)

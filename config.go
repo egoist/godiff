@@ -6,6 +6,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -279,10 +280,16 @@ type storeData struct {
 	Viewed       map[string]map[string]string `json:"viewed"`
 	SidebarWidth float32                      `json:"sidebarWidth"`
 	SidebarShown *bool                        `json:"sidebarShown"`
-	// LastRepository is the repository opened last, which the app opens
-	// when started without one, from the Dock.
-	LastRepository string `json:"lastRepository"`
+	// Recent are the repositories opened, the last first: File → Open
+	// Recent lists them, and the app opens the first when started without
+	// one, from the Dock.
+	Recent []string `json:"recent"`
+	// LastRepository is the repository opened last, as kept before Recent.
+	LastRepository string `json:"lastRepository,omitempty"`
 }
+
+// maxRecent is how many repositories File → Open Recent lists.
+const maxRecent = 10
 
 var state = &store{}
 
@@ -298,6 +305,10 @@ func (s *store) open() {
 	if s.data.Viewed == nil {
 		s.data.Viewed = map[string]map[string]string{}
 	}
+	if len(s.data.Recent) == 0 && s.data.LastRepository != "" {
+		s.data.Recent = []string{s.data.LastRepository}
+	}
+	s.data.LastRepository = ""
 }
 
 func (s *store) viewed(root string) map[string]string {
@@ -349,15 +360,32 @@ func (s *store) setLayout(width float32, shown bool) {
 	s.save()
 }
 
-func (s *store) lastRepository() string {
+// recent returns the repositories opened, the last first.
+func (s *store) recent() []string {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return s.data.LastRepository
+	return slices.Clone(s.data.Recent)
 }
 
-func (s *store) setLastRepository(root string) {
+// addRecent puts a repository first among the recent ones, and reports
+// whether that changed them.
+func (s *store) addRecent(root string) bool {
 	s.mu.Lock()
-	s.data.LastRepository = root
+	if len(s.data.Recent) > 0 && s.data.Recent[0] == root {
+		s.mu.Unlock()
+		return false
+	}
+	recent := slices.DeleteFunc(slices.Clone(s.data.Recent), func(r string) bool { return r == root })
+	recent = slices.Insert(recent, 0, root)
+	s.data.Recent = recent[:min(len(recent), maxRecent)]
+	s.mu.Unlock()
+	s.save()
+	return true
+}
+
+func (s *store) clearRecent() {
+	s.mu.Lock()
+	s.data.Recent = nil
 	s.mu.Unlock()
 	s.save()
 }

@@ -272,7 +272,7 @@ func openWindow(dir string, src source) error {
 		windowsMu.Unlock()
 	})
 	w.win.OnFocus(func() { go w.checkChanges() })
-	go state.setLastRepository(repo.Root)
+	go noteRecent(repo.Root)
 	w.load()
 	w.loadHistory()
 	w.loadUser()

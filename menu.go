@@ -53,6 +53,7 @@ func buildMenu() *mygo.Menu {
 		}},
 		{Label: "File", Submenu: []*mygo.MenuItem{
 			{Label: "Open Folder…", Accelerator: "CmdOrCtrl+O", Click: func(*mygo.MenuItem, *mygo.Window) { openFolder() }},
+			{Label: "Open Recent", Submenu: recentMenuItems()},
 			{Label: "Open Commit…", Accelerator: "CmdOrCtrl+Shift+C", Click: inWindow(func(w *window) { w.openDialog(dialogCommit) })},
 			{Label: "Open Branch…", Click: inWindow(func(w *window) { w.openDialog(dialogBranch) })},
 			{Label: "Open Pull Request…", Click: inWindow(func(w *window) { w.openDialog(dialogPull) })},
@@ -189,6 +190,40 @@ func openFolder() {
 		}
 		closeWelcome()
 	}()
+}
+
+// recentMenuItems open the repositories opened lately, as File → Open
+// Recent.
+func recentMenuItems() []*mygo.MenuItem {
+	var items []*mygo.MenuItem
+	for _, root := range state.recent() {
+		items = append(items, &mygo.MenuItem{Label: abbreviateHome(root), ToolTip: root, Click: func(*mygo.MenuItem, *mygo.Window) {
+			go openRecent(root)
+		}})
+	}
+	if len(items) > 0 {
+		items = append(items, mygo.Separator())
+	}
+	return append(items, &mygo.MenuItem{Label: "Clear Menu", Disabled: len(items) == 0, Click: func(*mygo.MenuItem, *mygo.Window) {
+		state.clearRecent()
+		mygo.App.SetMenu(buildMenu())
+	}})
+}
+
+// openRecent opens a repository of File → Open Recent.
+func openRecent(root string) {
+	if err := openWindow(root, source{kind: sourceWorkingTree}); err != nil {
+		mygo.Dialog.Error("Could not open "+abbreviateHome(root), errorText(err))
+		return
+	}
+	closeWelcome()
+}
+
+// noteRecent puts a repository first in File → Open Recent.
+func noteRecent(root string) {
+	if state.addRecent(root) {
+		mygo.RunOnMain(func() { mygo.App.SetMenu(buildMenu()) })
+	}
 }
 
 // agentMenuItems choose the agent that reviews with AI.

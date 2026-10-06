@@ -67,7 +67,8 @@ go run . [<commit> | <branch> | <pull request>] [<path>]
 
 Every repository opens in a window of its own. **Godiff → Install Command Line
 Tool…** installs a `godiff` command that opens the app on the repository it
-runs in.
+runs in. Started from Finder or the Dock, the app reopens the repository opened
+last, and **File → Open Recent** lists the ten opened lately.
 
 ### Keyboard
 
