@@ -204,7 +204,7 @@ func (w *window) nextHunk(dir int) {
 		}
 	}
 	a := anchors[at]
-	w.selFile, w.selHunk = a.file, a.hunk
+	w.selFile, w.selHunk, w.noteSel = a.file, a.hunk, nil
 	if a.hunk < 0 {
 		w.list.ScrollTo(a.row, ui.Start)
 	} else {

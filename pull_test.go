@@ -460,3 +460,78 @@ func TestAIModelMenu(t *testing.T) {
 		t.Errorf("model %q after choosing another agent", got)
 	}
 }
+
+func TestAINotes(t *testing.T) {
+	w, tt := newTestWindow(t, testRepo(t))
+	old := runAgent
+	t.Cleanup(func() { runAgent = old })
+	runAgent = func(ctx context.Context, a agent.Agent, req agent.Request, progress func(string)) (*agent.Analysis, error) {
+		return &agent.Analysis{
+			OverallSummary: "Greets louder.",
+			Agent:          a.Name,
+			GeneratedAt:    time.Now(),
+			Groups: []agent.Group{
+				{Key: "greeting", Label: "Greeting", FilePaths: []string{"main.go", "src/new.go"},
+					LineNotes: []agent.LineNote{{Path: "main.go", Side: "additions", Line: 6, Text: "Callers may match on Hello.", Critical: true}}},
+				{Key: "docs", Label: "Docs", FilePaths: []string{"docs/long.txt", "old.txt"},
+					FileNotes: []agent.FileNote{{Path: "old.txt", Text: "Nothing reads it anymore."}}},
+			},
+		}, nil
+	}
+	withSettings(t, func(s *Settings) { s.AIAgent = "claude" })
+	w.settings = cfg.Get()
+	w.runAnalysis()
+	tt.Frame()
+	tt.Frame()
+	// The card lists the notes, each going to its line.
+	for _, want := range []string{"Go to the note on main.go:6", "Go to the note on old.txt"} {
+		if _, ok := tt.Find(want); !ok {
+			t.Fatalf("no %q in %q", want, tt.Texts())
+		}
+	}
+	snapshot(t, tt, "ai-notes")
+	// A note on a file closed opens it.
+	i := slices.IndexFunc(w.files, func(f *fileState) bool { return f.Path == "old.txt" })
+	w.files[i].collapsed = true
+	w.rowsDirty = true
+	tt.Frame()
+	if err := tt.Click("Go to the note on old.txt"); err != nil {
+		t.Fatal(err)
+	}
+	tt.Frame()
+	noteShown := func(path string) bool {
+		if w.noteSel == nil || w.noteSel.path != path {
+			return false
+		}
+		first, last := w.list.Visible()
+		for r := first; r <= last && r < len(w.rows); r++ {
+			if w.rows[r].kind == rowAINote && w.rows[r].note == w.noteSel {
+				return true
+			}
+		}
+		return false
+	}
+	if !noteShown("old.txt") || w.files[i].collapsed {
+		t.Fatalf("note %+v, collapsed %v", w.noteSel, w.files[i].collapsed)
+	}
+	snapshot(t, tt, "ai-note-shown")
+	// N and Shift-N go through them, around from the end.
+	tt.Key(0, ui.KeyN)
+	tt.Frame()
+	if !noteShown("main.go") {
+		t.Errorf("next: note %+v", w.noteSel)
+	}
+	tt.Key(ui.Shift, ui.KeyN)
+	tt.Frame()
+	if !noteShown("old.txt") {
+		t.Errorf("previous: note %+v", w.noteSel)
+	}
+	tt.Key(0, ui.KeyEscape)
+	tt.Frame()
+	if w.noteSel != nil {
+		t.Error("Escape kept the note marked")
+	}
+	if !slices.ContainsFunc(w.commands(), func(c command) bool { return c.title == "Next AI Note" && c.run != nil }) {
+		t.Error("no command to go to the next note")
+	}
+}

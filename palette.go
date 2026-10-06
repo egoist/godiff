@@ -31,6 +31,13 @@ func (w *window) commands() []command {
 	if w.settings.WordWrap {
 		wrap = "Disable Word Wrap"
 	}
+	// Going to the notes of the agent's review, when there are.
+	notes := func(dir int) func() {
+		if len(w.notes) == 0 {
+			return nil
+		}
+		return func() { w.nextNote(dir) }
+	}
 	whitespace := "Show Whitespace Changes"
 	if w.settings.ShowWhitespace {
 		whitespace = "Hide Whitespace Changes"
@@ -47,6 +54,8 @@ func (w *window) commands() []command {
 		{title: "Show Pull Requests", keys: "⌘3", run: w.showPulls},
 		{title: "Review with AI", hint: w.agentHint(), keys: "⌘⇧I", run: w.reviewWithAI},
 		{title: "Stop the AI Review", run: w.stopAnalysis},
+		{title: "Next AI Note", keys: "N", run: notes(1)},
+		{title: "Previous AI Note", keys: "⇧N", run: notes(-1)},
 		{title: "Group Files by Kind", run: func() { w.chooseGrouping(groupKind) }},
 		{title: "Group Files by AI Review", run: func() { w.chooseGrouping(groupAI) }},
 		{title: "Ungroup Files", run: func() { w.chooseGrouping(groupNone) }},
@@ -157,7 +166,7 @@ func (w *window) palette(c *ui.Context) {
 	q := strings.TrimSpace(w.paletteQuery)
 	var cmds []command
 	for _, cmd := range w.commands() {
-		if fuzzyMatch(cmd.title, q) {
+		if cmd.run != nil && fuzzyMatch(cmd.title, q) {
 			cmds = append(cmds, cmd)
 		}
 	}
@@ -364,6 +373,7 @@ func (w *window) shortcutsHelp(c *ui.Context) {
 		keys  [][2]string
 	}{
 		{"Navigation", [][2]string{{"Command bar", "⌘K"}, {"Filter files", "⌘P"}, {"Next hunk", "J"}, {"Previous hunk", "K"},
+			{"Next AI note", "N"}, {"Previous AI note", "⇧N"},
 			{"Toggle sidebar", "⌘⇧B"}, {"Toggle word wrap", "⌥Z"}, {"Open file in editor", "⌘⇧O"}, {"Refresh changes", "⌘R"}}},
 		{"Search", [][2]string{{"Find in diffs", "⌘F"}, {"Next match", "↩"}, {"Previous match", "⇧↩"}, {"Close search", "Esc"}}},
 		{"Comments", [][2]string{{"Comment on a line", "Click"}, {"Comment on the hunk", "↩"}, {"Add comment", "⌘↩"}, {"Discard comment", "Esc"}}},

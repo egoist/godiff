@@ -44,7 +44,9 @@ dark mode, menus and vibrancy.
   the agent's own sign-in, and its review is kept until you ask for
   another. Choose the agent and the model in the review's card, among
   those the agent lists, of any of its providers; by default OpenCode
-  reviews with the model it starts with itself.
+  reviews with the model it starts with itself. The card lists the notes,
+  and the file tree marks the files with some: click one, or press
+  <kbd>N</kbd> and <kbd>⇧N</kbd>, to go from note to note.
 - **Find in diffs** (<kbd>⌘F</kbd>), a **file filter** (<kbd>⌘P</kbd>) and a
   **command bar** (<kbd>⌘K</kbd>).
 - Image previews of changed pictures, a file tree with change counts and
@@ -80,6 +82,7 @@ last, and **File → Open Recent** lists the ten opened lately.
 | <kbd>⌘P</kbd> | Filter files |
 | <kbd>⌘F</kbd> | Find in diffs |
 | <kbd>J</kbd> / <kbd>K</kbd> | Next / previous hunk |
+| <kbd>N</kbd> / <kbd>⇧N</kbd> | Next / previous AI note |
 | <kbd>Enter</kbd> | Comment on the hunk chosen |
 | <kbd>⌘↩</kbd> | Add the comment; commit, in the commit view |
 | <kbd>⌘⇧B</kbd> | Toggle the sidebar |

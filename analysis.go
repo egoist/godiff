@@ -33,6 +33,8 @@ type analysisState struct {
 	cancel       context.CancelFunc
 	agent        string // the label of the agent at work
 	folded       bool
+	// allNotes lists every note in the card, not the first alone.
+	allNotes bool
 	// offered is set when the user chose to group by a review there is
 	// not yet: the card offers one, which runs once they ask.
 	offered bool
@@ -373,6 +375,65 @@ func (w *window) summaryCard(c *ui.Context, pal *palette) *ui.Element {
 				}
 			}
 		})
+		w.noteList(c, pal, st)
+	})
+}
+
+// listedNotes is how many notes the card lists before it is asked for all.
+const listedNotes = 5
+
+// noteList lists the notes of the agent's review, each going to its line.
+func (w *window) noteList(c *ui.Context, pal *palette, st *analysisState) {
+	t := c.Theme()
+	notes := w.orderedNotes()
+	if len(notes) == 0 {
+		return
+	}
+	shown := notes
+	if !st.allNotes && len(notes) > listedNotes {
+		shown = notes[:listedNotes]
+	}
+	ui.Column(c).Gap(1).Margin(0, -8).Children(func() {
+		for _, n := range shown {
+			where := filepath.Base(n.path)
+			switch {
+			case n.file:
+			case n.side == sideOld:
+				where += fmt.Sprintf(":%d (old)", n.line)
+			default:
+				where += fmt.Sprintf(":%d", n.line)
+			}
+			accent, icon := t.Accent, iconSparkle
+			if n.critical {
+				accent, icon = t.Danger, iconAlert
+			}
+			b := ui.ButtonBase(c).Padding(4, 8).Radius(6).Label("Go to the note on " + where).Tooltip(n.path)
+			if b.Hovered() || n == w.noteSel {
+				b.Background(pal.hover)
+			}
+			b.Children(func() {
+				ui.Row(c).Gap(8).Grow(1).MinWidth(0).Children(func() {
+					ui.Icon(c, icon).FontSize(12).TextColor(accent).Shrink(0)
+					ui.Text(c, where).Font(w.codeFont()).FontSize(11).TextColor(t.TextMuted).SingleLine().Shrink(0).MaxWidth(260)
+					ui.Text(c, n.text).FontSize(12).SingleLine().Grow(1).Shrink(1).MinWidth(0)
+				})
+			})
+			if b.Clicked() {
+				w.revealNote(n)
+			}
+		}
+		if len(notes) > listedNotes {
+			label := fmt.Sprintf("Show %d more", len(notes)-listedNotes)
+			if st.allNotes {
+				label = "Show fewer"
+			}
+			b := ui.ButtonBase(c).Padding(4, 8).Children(func() {
+				ui.Text(c, label).FontSize(12).FontWeight(600).TextColor(t.Accent)
+			})
+			if b.Clicked() {
+				st.allNotes = !st.allNotes
+			}
+		}
 	})
 }
 

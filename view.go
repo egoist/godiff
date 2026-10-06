@@ -386,8 +386,14 @@ func (w *window) shortcuts(c *ui.Context) {
 	if w.diffListEl.Shortcut(0, ui.KeyEnter) || (w.selHunk >= 0 && c.Shortcut(0, ui.KeyEnter)) {
 		w.commentOnSelection()
 	}
-	if w.selHunk >= 0 && c.Shortcut(0, ui.KeyEscape) {
-		w.selFile, w.selHunk = -1, -1
+	if c.Shortcut(0, ui.KeyN) {
+		w.nextNote(1)
+	}
+	if c.Shortcut(ui.Shift, ui.KeyN) {
+		w.nextNote(-1)
+	}
+	if (w.selHunk >= 0 || w.noteSel != nil) && c.Shortcut(0, ui.KeyEscape) {
+		w.selFile, w.selHunk, w.noteSel = -1, -1, nil
 	}
 	if c.Shortcut(ui.Alt, ui.KeyZ) {
 		toggleWrap()

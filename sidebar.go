@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"log"
 	"runtime"
+	"slices"
 	"strings"
 	"time"
 
@@ -526,6 +527,17 @@ func (w *window) fileTree(c *ui.Context) {
 			name := ui.Text(c, n.name).FontSize(13).SingleLine().Grow(1).Shrink(1).MinWidth(0)
 			if viewed && !(selected && focused) {
 				name.TextColor(t.TextMuted)
+			}
+			if notes := w.notes[f.Path]; len(notes) > 0 {
+				// The file has notes of the agent's review.
+				color := t.Accent
+				if slices.ContainsFunc(notes, func(n *aiNote) bool { return n.critical }) {
+					color = t.Danger
+				}
+				if selected && focused {
+					color = t.AccentText
+				}
+				ui.Icon(c, iconSparkle).FontSize(11).TextColor(color).Shrink(0).Tooltip(plural(len(notes), "AI note"))
 			}
 			if countable(f) && (f.Additions > 0 || f.Deletions > 0) {
 				ui.Textf(c, "+%s -%s", compact(f.Additions), compact(f.Deletions)).

@@ -150,8 +150,10 @@ type window struct {
 	// The groups of the files: by kind, or as an agent's review has them.
 	groupPref groupMode
 	groups    []fileGroup
-	// notes are the notes of the agent's review, by path.
-	notes map[string][]*aiNote
+	// notes are the notes of the agent's review, by path, and noteSel the
+	// one gone to last.
+	notes   map[string][]*aiNote
+	noteSel *aiNote
 	// regroupPending groups the files again as the next frame starts.
 	regroupPending bool
 	// placed are the threads and notes the rows show under their lines,

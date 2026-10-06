@@ -406,11 +406,23 @@ type aiNote struct {
 // buildNotes gathers the notes of the agent's review on files unchanged
 // since: on others, the lines they are on may have moved.
 func (w *window) buildNotes() {
-	w.notes = nil
+	sel := w.noteSel
+	w.notes, w.noteSel = nil, nil
 	st := w.analyses[w.source]
 	if st == nil || st.result == nil {
 		return
 	}
+	// The note gone to last stays marked.
+	defer func() {
+		if sel == nil {
+			return
+		}
+		for _, n := range w.notes[sel.path] {
+			if *n == *sel {
+				w.noteSel = n
+			}
+		}
+	}()
 	current := map[string]bool{}
 	for _, f := range w.files {
 		if fp, ok := st.fingerprints[f.Path]; !ok || fp == f.Fingerprint {
@@ -445,9 +457,14 @@ func (w *window) noteRow(c *ui.Context, pal *palette, n *aiNote) {
 	if n.critical {
 		accent = t.Danger
 	}
+	border := accent.Alpha(0.22)
+	if n == w.noteSel {
+		// The note gone to last.
+		border = accent
+	}
 	w.card(c, pal).Padding(6, 16).Children(func() {
 		ui.Row(c).Grow(1).MinWidth(0).Gap(10).Padding(8, 12).Radius(10).AlignItems(ui.Start).
-			Background(accent.Alpha(0.07)).Border(1, accent.Alpha(0.22)).Children(func() {
+			Background(accent.Alpha(0.07)).Border(1, border).Children(func() {
 			ui.Icon(c, iconSparkle).FontSize(14).TextColor(accent).Margin(1, 0, 0)
 			ui.Column(c).Grow(1).MinWidth(0).Gap(2).Children(func() {
 				label := "AI note"
@@ -467,6 +484,87 @@ func (w *window) noteRow(c *ui.Context, pal *palette, n *aiNote) {
 			})
 		})
 	})
+}
+
+// orderedNotes lists the notes of the agent's review in the order their
+// files show, those on a whole file before those on its lines.
+func (w *window) orderedNotes() []*aiNote {
+	var out []*aiNote
+	for _, f := range w.files {
+		notes := slices.Clone(w.notes[f.Path])
+		slices.SortStableFunc(notes, func(a, b *aiNote) int {
+			if a.file != b.file {
+				if a.file {
+					return -1
+				}
+				return 1
+			}
+			return a.line - b.line
+		})
+		out = append(out, notes...)
+	}
+	return out
+}
+
+// nextNote shows the next (dir 1) or the previous (dir -1) note of the
+// agent's review, after the one shown last, else after the file at the
+// top, and around from the end.
+func (w *window) nextNote(dir int) {
+	notes := w.orderedNotes()
+	if len(notes) == 0 {
+		return
+	}
+	at := slices.Index(notes, w.noteSel)
+	if at >= 0 {
+		at = (at + dir + len(notes)) % len(notes)
+	} else {
+		file := map[string]int{}
+		for i, f := range w.files {
+			file[f.Path] = i
+		}
+		if dir > 0 {
+			at = max(slices.IndexFunc(notes, func(n *aiNote) bool { return file[n.path] >= w.current }), 0)
+		} else {
+			at = len(notes) - 1
+			for i, n := range notes {
+				if file[n.path] < w.current {
+					at = i
+				}
+			}
+		}
+	}
+	w.revealNote(notes[at])
+}
+
+// revealNote scrolls a note of the agent's review into the middle of the
+// surface, opening its file when closed, and marks it.
+func (w *window) revealNote(n *aiNote) {
+	fi := slices.IndexFunc(w.files, func(f *fileState) bool { return f.Path == n.path })
+	if fi < 0 {
+		return
+	}
+	if !w.fileVisible(fi) {
+		w.filter = ""
+		if !w.fileVisible(fi) {
+			w.finding = false
+		}
+	}
+	if f := w.files[fi]; f.collapsed && !w.forceOpen(fi) {
+		f.collapsed = false
+	}
+	w.rowsDirty = true
+	w.buildRows()
+	for i := range w.rows {
+		if r := &w.rows[i]; r.kind == rowAINote && r.note == n {
+			w.list.ScrollTo(i, ui.Center)
+			break
+		}
+	}
+	w.noteSel = n
+	w.selFile, w.selHunk = -1, -1
+	w.current = fi
+	w.revealedAt = w.now
+	w.selectTreeFile(fi)
 }
 
 // analysisFiles describes the files to an agent.
