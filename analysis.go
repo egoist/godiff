@@ -693,11 +693,14 @@ func (w *window) groupControl(c *ui.Context, pal *palette) {
 				s.Background(pal.headerBg).Shadow(0, 1, 2, 0, ui.RGBA(0, 0, 0, 0.12)).TextColor(t.Text)
 			}
 			s.Children(func() {
-				ic := ui.Icon(c, it.icon).FontSize(15)
 				if i == 2 && running {
-					ic.TextColor(t.Accent)
-					ic.Opacity(0.4 + 0.6*ic.Loop("pulse", 1200*time.Millisecond, ui.Bounce(ui.EaseInOut)))
+					// A review under way. A spinner is painted again, as
+					// the card's, where an animation of the icon would
+					// build the window again at every frame.
+					ui.Spinner(c).Size(14, 14)
+					return
 				}
+				ui.Icon(c, it.icon).FontSize(15)
 			})
 		}
 	})
