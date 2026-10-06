@@ -18,3 +18,7 @@ func HideConsole(cmd *exec.Cmd) {
 	cmd.SysProcAttr.CreationFlags |= createNoWindow
 	cmd.SysProcAttr.HideWindow = true
 }
+
+// KillGroup has cancelling the command's context kill it, as it does
+// anyway on Windows.
+func KillGroup(cmd *exec.Cmd) {}

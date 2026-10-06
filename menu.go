@@ -3,6 +3,7 @@ package main
 import (
 	"runtime"
 
+	"github.com/egoist/godiff/internal/agent"
 	"github.com/egoist/mygo"
 )
 
@@ -54,6 +55,7 @@ func buildMenu() *mygo.Menu {
 			{Label: "Open Folder…", Accelerator: "CmdOrCtrl+O", Click: func(*mygo.MenuItem, *mygo.Window) { openFolder() }},
 			{Label: "Open Commit…", Accelerator: "CmdOrCtrl+Shift+C", Click: inWindow(func(w *window) { w.openDialog(dialogCommit) })},
 			{Label: "Open Branch…", Click: inWindow(func(w *window) { w.openDialog(dialogBranch) })},
+			{Label: "Open Pull Request…", Click: inWindow(func(w *window) { w.openDialog(dialogPull) })},
 			mygo.Separator(),
 			{Label: "Commit…", Accelerator: "CmdOrCtrl+Shift+Enter", Click: inWindow(func(w *window) {
 				if w.source.kind == sourceWorkingTree && !w.commitOpen && len(w.files) > 0 {
@@ -84,6 +86,15 @@ func buildMenu() *mygo.Menu {
 			{Label: "Toggle Sidebar", Accelerator: "CmdOrCtrl+Shift+B", Click: inWindow(func(w *window) { w.toggleSidebar() })},
 			{Label: "Files", Accelerator: "CmdOrCtrl+1", Click: inWindow(func(w *window) { w.tab, w.sidebarShown = 0, true })},
 			{Label: "History", Accelerator: "CmdOrCtrl+2", Click: inWindow(func(w *window) { w.tab, w.sidebarShown = 1, true })},
+			{Label: "Pull Requests", Accelerator: "CmdOrCtrl+3", Click: inWindow(func(w *window) { w.showPulls() })},
+			mygo.Separator(),
+			{Label: "Review with AI", Accelerator: "CmdOrCtrl+Shift+I", Click: inWindow(func(w *window) { w.reviewWithAI() })},
+			{Label: "Group Files", Submenu: []*mygo.MenuItem{
+				{Label: "Not at All", Click: inWindow(func(w *window) { w.chooseGrouping(groupNone) })},
+				{Label: "By Kind", Click: inWindow(func(w *window) { w.chooseGrouping(groupKind) })},
+				{Label: "By AI Review", Click: inWindow(func(w *window) { w.chooseGrouping(groupAI) })},
+			}},
+			{Label: "AI Agent", Submenu: agentMenuItems(s)},
 			mygo.Separator(),
 			{Label: "Diff", Submenu: []*mygo.MenuItem{
 				{ID: "split", Label: "Split", Type: mygo.MenuItemRadio, Checked: s.DiffStyle == "split", Click: func(*mygo.MenuItem, *mygo.Window) {
@@ -147,6 +158,10 @@ func syncMenu(s Settings) {
 	set("theme-system", s.Theme == "system")
 	set("theme-light", s.Theme == "light")
 	set("theme-dark", s.Theme == "dark")
+	set("agent-", s.AIAgent == "")
+	for _, a := range agent.All {
+		set("agent-"+a.Name, s.AIAgent == a.Name)
+	}
 }
 
 // applyTheme follows the theme of the settings.
@@ -174,4 +189,25 @@ func openFolder() {
 		}
 		closeWelcome()
 	}()
+}
+
+// agentMenuItems choose the agent that reviews with AI.
+func agentMenuItems(s Settings) []*mygo.MenuItem {
+	choose := func(name string) func(*mygo.MenuItem, *mygo.Window) {
+		return func(*mygo.MenuItem, *mygo.Window) {
+			cfg.Update(func(s *Settings) {
+				if s.AIAgent != name {
+					s.AIAgent, s.AIModel = name, ""
+				}
+			})
+		}
+	}
+	items := []*mygo.MenuItem{
+		{ID: "agent-", Label: "Automatic", Type: mygo.MenuItemRadio, Checked: s.AIAgent == "", Click: choose("")},
+		mygo.Separator(),
+	}
+	for _, a := range agent.All {
+		items = append(items, &mygo.MenuItem{ID: "agent-" + a.Name, Label: a.Label, Type: mygo.MenuItemRadio, Checked: s.AIAgent == a.Name, Click: choose(a.Name)})
+	}
+	return items
 }

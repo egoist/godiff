@@ -2,6 +2,7 @@ package main
 
 import (
 	"github.com/egoist/godiff/internal/diff"
+	"github.com/egoist/godiff/internal/github"
 	"github.com/egoist/godiff/internal/highlight"
 	"github.com/egoist/mygo/ui"
 )
@@ -33,6 +34,8 @@ type fileState struct {
 	// spans keeps the styled code of the lines shown, which does not change
 	// from frame to frame.
 	spans map[spanKey][]ui.Span
+	// group is the index of the file's group, -1 for none.
+	group int
 }
 
 // spanKey identifies the code of a line on one side, in the light or the
@@ -58,6 +61,11 @@ const (
 	rowComment                // a comment on the line above
 	rowEnd                    // the bottom of a file's card
 	rowCommit                 // the message of the commit shown
+	rowPull                   // the pull request shown
+	rowSummary                // the agent's review of the changes
+	rowGroup                  // the header of a group of files
+	rowThread                 // a review thread of the pull request
+	rowAINote                 // a note of the agent's review
 )
 
 // row is a row of the diff surface.
@@ -75,8 +83,16 @@ type row struct {
 	// lines it hides.
 	gap   int32
 	count int32
-	// For comments: the comment.
+	// For comments: the comment, the thread or the note.
 	comment *comment
+	thread  *github.Thread
+	note    *aiNote
+}
+
+// banner reports whether the row stands above the files: the commit's
+// message, the pull request, the agent's review.
+func (r *row) banner() bool {
+	return r.kind == rowCommit || r.kind == rowPull || r.kind == rowSummary
 }
 
 // rowKey identifies a row across rebuilds, so that the list keeps its
@@ -87,6 +103,8 @@ type rowKey struct {
 	old, new int32
 	gap      int32
 	comment  *comment
+	thread   int64
+	note     *aiNote
 }
 
 // oneSided reports whether the file is all new or all gone, with lines on
@@ -202,23 +220,42 @@ func (w *window) buildRows() {
 		// The message scrolls with the changes, long as it may be.
 		rows = append(rows, row{kind: rowCommit})
 	}
+	if w.source.kind == sourcePull && w.pr != nil && w.pr.meta != nil {
+		rows = append(rows, row{kind: rowPull})
+	}
+	if w.showSummary() {
+		rows = append(rows, row{kind: rowSummary})
+	}
+	w.placed = map[any]bool{}
+	group := -1
 	for fi, f := range w.files {
 		if !w.fileVisible(fi) {
 			continue
 		}
 		idx := int32(fi)
+		if f.group >= 0 && f.group != group {
+			group = f.group
+			rows = append(rows, row{kind: rowGroup, file: idx, gap: int32(group)})
+		}
 		rows = append(rows, row{kind: rowHeader, file: idx})
 		if f.collapsed && !w.forceOpen(fi) {
 			rows = append(rows, row{kind: rowEnd, file: idx})
 			continue
 		}
+		for _, n := range w.notes[f.Path] {
+			if n.file {
+				rows = append(rows, row{kind: rowAINote, file: idx, note: n})
+			}
+		}
 		if f.oldImage != nil || f.newImage != nil {
 			rows = append(rows, row{kind: rowImage, file: idx})
+			rows = w.appendUnplaced(rows, idx, f)
 			rows = append(rows, row{kind: rowEnd, file: idx})
 			continue
 		}
 		if note := w.fileNote(f); note != "" {
 			rows = append(rows, row{kind: rowNote, file: idx})
+			rows = w.appendUnplaced(rows, idx, f)
 			rows = append(rows, row{kind: rowEnd, file: idx})
 			continue
 		}
@@ -298,10 +335,41 @@ func (w *window) buildRows() {
 		if len(f.Hunks) > 0 {
 			addGap(f.gapBefore(len(f.Hunks)))
 		}
+		rows = w.appendUnplaced(rows, idx, f)
 		rows = append(rows, row{kind: rowEnd, file: idx})
 	}
 	w.rows = rows
 	w.rowsDirty = false
+}
+
+// threads returns the review threads of a file of the pull request shown.
+func (w *window) threads(path string) []*github.Thread {
+	if w.pr == nil || w.pr.reviews == nil {
+		return nil
+	}
+	var out []*github.Thread
+	for _, t := range w.pr.reviews.Threads {
+		if t.Path == path {
+			out = append(out, t)
+		}
+	}
+	return out
+}
+
+// appendUnplaced adds the threads and the notes of a file whose lines
+// do not show: outdated, or in lines hidden.
+func (w *window) appendUnplaced(rows []row, idx int32, f *fileState) []row {
+	for _, t := range w.threads(f.Path) {
+		if !w.placed[t] {
+			rows = append(rows, row{kind: rowThread, file: idx, thread: t})
+		}
+	}
+	for _, n := range w.notes[f.Path] {
+		if !n.file && !w.placed[n] {
+			rows = append(rows, row{kind: rowAINote, file: idx, note: n})
+		}
+	}
+	return rows
 }
 
 // appendContext adds a line of context the user expanded.
@@ -311,8 +379,31 @@ func (w *window) appendContext(rows []row, idx int32, f *fileState, old, new int
 	return w.appendComments(rows, idx, f, &line)
 }
 
-// appendComments adds the comments on a line.
+// appendComments adds the threads, the notes and the comments on a line.
 func (w *window) appendComments(rows []row, idx int32, f *fileState, l *diff.Line) []row {
+	on := func(sd side, line int) bool {
+		// Unchanged lines take comments on either side.
+		return (sd == sideOld && l.Kind != diff.Add && line == l.Old) || (sd == sideNew && l.Kind != diff.Del && line == l.New)
+	}
+	for _, t := range w.threads(f.Path) {
+		if t.Outdated || t.Line == 0 || w.placed[t] {
+			continue
+		}
+		sd := sideNew
+		if t.Side == github.Left {
+			sd = sideOld
+		}
+		if on(sd, t.Line) {
+			w.placed[t] = true
+			rows = append(rows, row{kind: rowThread, file: idx, thread: t})
+		}
+	}
+	for _, n := range w.notes[f.Path] {
+		if !n.file && !w.placed[n] && on(n.side, n.line) {
+			w.placed[n] = true
+			rows = append(rows, row{kind: rowAINote, file: idx, note: n})
+		}
+	}
 	for _, cm := range w.comments {
 		if cm.path != f.Path {
 			continue
@@ -328,11 +419,17 @@ func (w *window) appendComments(rows []row, idx int32, f *fileState, l *diff.Lin
 
 // key returns the identity of a row.
 func (w *window) key(r *row) rowKey {
-	if r.kind == rowCommit {
-		return rowKey{kind: rowCommit}
+	switch r.kind {
+	case rowCommit, rowPull, rowSummary:
+		return rowKey{kind: r.kind}
+	case rowGroup:
+		return rowKey{kind: rowGroup, gap: r.gap}
 	}
 	f := w.files[r.file]
-	k := rowKey{kind: r.kind, file: f.Path, gap: r.gap, comment: r.comment}
+	k := rowKey{kind: r.kind, file: f.Path, gap: r.gap, comment: r.comment, note: r.note}
+	if r.thread != nil {
+		k.thread = r.thread.RootID
+	}
 	if r.kind == rowLine {
 		if r.hunk < 0 {
 			k.old, k.new = r.old, r.new

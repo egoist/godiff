@@ -10,17 +10,26 @@ import (
 	"sync"
 	"time"
 
+	"github.com/egoist/godiff/internal/agent"
 	"github.com/egoist/mygo"
 )
 
 // Settings are the user's preferences, in ~/.godiff/godiff.jsonc as
 // codiff keeps its own in ~/.codiff/codiff.jsonc.
 type Settings struct {
-	CodeFontFamily       string `json:"codeFontFamily"`
-	CodeFontSize         int    `json:"codeFontSize"`
-	CopyCommentsOnClose  bool   `json:"copyCommentsOnClose"`
-	DiffStyle            string `json:"diffStyle"` // split or unified
-	EditorCommand        string `json:"editorCommand"`
+	CodeFontFamily      string `json:"codeFontFamily"`
+	CodeFontSize        int    `json:"codeFontSize"`
+	CopyCommentsOnClose bool   `json:"copyCommentsOnClose"`
+	DiffStyle           string `json:"diffStyle"` // split or unified
+	EditorCommand       string `json:"editorCommand"`
+	// GithubToken reads and reviews pull requests; empty, the token of
+	// the GitHub CLI is used.
+	GithubToken string `json:"githubToken"`
+	// AIAgent reviews changes: claude, codex, opencode or pi, or empty for
+	// the first installed. AIModel is the model it uses, empty for its own
+	// default.
+	AIAgent              string `json:"aiAgent"`
+	AIModel              string `json:"aiModel"`
 	ReviewCommentsPrefix string `json:"reviewCommentsPrefix"`
 	SidebarPosition      string `json:"sidebarPosition"` // left or right
 	ShowWhitespace       bool   `json:"showWhitespace"`
@@ -57,6 +66,11 @@ func (s *Settings) normalize() {
 	}
 	if s.ReviewCommentsPrefix == "" {
 		s.ReviewCommentsPrefix = d.ReviewCommentsPrefix
+	}
+	s.GithubToken = strings.TrimSpace(s.GithubToken)
+	s.AIModel = strings.TrimSpace(s.AIModel)
+	if _, ok := agent.ByName(s.AIAgent); !ok {
+		s.AIAgent = ""
 	}
 }
 

@@ -2,6 +2,7 @@ package main
 
 import (
 	"errors"
+	"fmt"
 	"log"
 	"os"
 	"path/filepath"
@@ -27,6 +28,10 @@ func (w *window) view(c *ui.Context) {
 	t := c.Theme()
 	pal := paletteFor(t)
 	w.now = c.Now()
+	if w.regroupPending {
+		w.regroupPending = false
+		w.regroup()
+	}
 	// On macOS, the window shows the sidebar's material where nothing is
 	// drawn. Elsewhere it would show black, as under the translucent edge
 	// of the sidebar, so the sidebar's color is drawn there instead.
@@ -51,6 +56,7 @@ func (w *window) view(c *ui.Context) {
 	w.palette(c)
 	w.sourceDialog(c)
 	w.shortcutsHelp(c)
+	w.reviewDialog(c)
 	if w.discarding != nil {
 		open := true
 		if choice := ui.AlertDialog(c, &open, "Discard this review comment?", "Its text will be lost.", "Cancel", "Discard"); choice == 1 {
@@ -97,7 +103,7 @@ func (w *window) toolbar(c *ui.Context, pal *palette) {
 			ui.Text(c, filepath.Base(w.repo.Root)).FontSize(13).Bold().SingleLine()
 			ui.Text(c, filepath.Dir(abbreviateHome(w.repo.Root))).FontSize(11).TextColor(t.TextMuted).SingleLine()
 		})
-		if w.branch != "" {
+		if w.branch != "" && w.source.kind != sourcePull {
 			chip(c, pal, iconBranch, w.branch, t.TextMuted).Tooltip("Branch " + w.branch)
 		}
 		switch w.source.kind {
@@ -106,6 +112,16 @@ func (w *window) toolbar(c *ui.Context, pal *palette) {
 			chip(c, pal, iconCommit, label, pal.ref).Font(w.codeFont()).Tooltip(w.source.ref)
 		case sourceBranch:
 			chip(c, pal, iconBranch, "Local + branch vs "+w.source.ref, pal.ref)
+		case sourcePull:
+			repo, n := w.source.pull()
+			tip := repo.String()
+			if w.pr != nil && w.pr.meta != nil {
+				tip = w.pr.meta.Title
+				chip(c, pal, iconPull, fmt.Sprintf("#%d", n), pal.ref).Tooltip(tip).Shrink(0)
+				chip(c, pal, iconBranch, w.pr.meta.Base.Ref+" ← "+w.pr.meta.Head.Ref, t.TextMuted).Tooltip(w.pr.meta.Base.Label + " ← " + w.pr.meta.Head.Label)
+			} else {
+				chip(c, pal, iconPull, fmt.Sprintf("#%d", n), pal.ref).Tooltip(tip).Shrink(0)
+			}
 		}
 		if w.loading && len(w.files) > 0 {
 			ui.Spinner(c).Label("Loading").Size(14, 14)
@@ -138,6 +154,10 @@ func (w *window) toolbar(c *ui.Context, pal *palette) {
 				}
 				ui.Textf(c, "%d", n).Font(w.codeFont()).FontSize(11).FontWeight(700)
 			})
+			if w.source.kind == sourcePull {
+				w.reviewButton(c, pal)
+			}
+			w.groupControl(c, pal)
 			w.layoutControl(c, pal)
 		}
 	})
@@ -190,7 +210,11 @@ func (w *window) mainArea(c *ui.Context, pal *palette) {
 		ui.Row(c).Justify(ui.Center).Padding(8, 12, 0).Children(func() {
 			ui.Row(c).Gap(6).Padding(5, 6, 5, 12).Radius(16).Background(pal.viewed.Alpha(0.1).Over(pal.codeBg)).
 				Border(1, pal.viewed.Alpha(0.2)).Children(func() {
-				ui.Text(c, "Local changes detected,").FontSize(13).FontWeight(600).TextColor(pal.viewed.Mix(t.Text, 0.6))
+				what := "Local changes detected,"
+				if w.source.kind == sourcePull {
+					what = "New commits were pushed,"
+				}
+				ui.Text(c, what).FontSize(13).FontWeight(600).TextColor(pal.viewed.Mix(t.Text, 0.6))
 				ref := ui.ButtonBase(c).FocusRing(true).Children(func() {
 					ui.Text(c, "refresh to see them.").FontSize(13).FontWeight(600).Underline().TextColor(pal.viewed.Mix(t.Text, 0.6))
 				})
@@ -202,6 +226,9 @@ func (w *window) mainArea(c *ui.Context, pal *palette) {
 				}
 			})
 		})
+	}
+	if len(w.files) > 0 && w.loadErr == nil {
+		w.scopeBar(c, pal)
 	}
 	find := ui.FindBar(c, &w.finding, &w.query, len(w.matches), &w.match).Label("Find in diffs")
 	if find.FocusWithin() {
@@ -235,10 +262,16 @@ func (w *window) mainArea(c *ui.Context, pal *palette) {
 		w.commitMessage(c, pal).Margin(11, 12, 0)
 	}
 	switch {
+	case w.loadErr != nil && w.source.kind == sourcePull:
+		emptyPanel(c, pal, "Unable to open the pull request", errorText(w.loadErr), func() {
+			if ui.Button(c, "Try Again").Clicked() {
+				w.load()
+			}
+		})
 	case w.loadErr != nil:
 		emptyPanel(c, pal, "Unable to read repository", errorText(w.loadErr), nil)
 	case slow:
-		thinking(c)
+		thinking(c, w.loadStatus)
 	case waiting && len(w.files) == 0:
 		ui.Box(c).Grow(1)
 	case len(w.files) == 0:
@@ -248,6 +281,8 @@ func (w *window) mainArea(c *ui.Context, pal *palette) {
 			title, detail = "No changes in commit", shortHash(w.source.ref)
 		case sourceBranch:
 			title, detail = "No changes", w.source.ref
+		case sourcePull:
+			title, detail = "No changes in pull request", w.source.ref
 		}
 		emptyPanel(c, pal, title, detail, func() {
 			if w.source.kind == sourceWorkingTree && len(w.history) > 0 {
@@ -316,11 +351,15 @@ func emptyPanel(c *ui.Context, pal *palette, title, detail string, actions func(
 // thinkingDelay is how long a load goes before the window says so.
 const thinkingDelay = 200 * time.Millisecond
 
-// thinking shows that the changes are loading.
-func thinking(c *ui.Context) {
+// thinking shows that the changes are loading, and what the load does
+// when it says.
+func thinking(c *ui.Context, status string) {
 	t := c.Theme()
+	if status == "" {
+		status = "Thinking…"
+	}
 	ui.Column(c).Grow(1).Center().Children(func() {
-		label := ui.Text(c, "Thinking…").Italic().FontSize(13).Font("SF Mono, Menlo, monospace").TextColor(t.TextMuted)
+		label := ui.Text(c, status).Italic().FontSize(13).Font("SF Mono, Menlo, monospace").TextColor(t.TextMuted)
 		label.Opacity(0.5 + 0.5*label.Loop("pulse", 1600*time.Millisecond, ui.Bounce(ui.EaseInOut)))
 	})
 }
@@ -335,7 +374,7 @@ func (w *window) shortcuts(c *ui.Context) {
 	// had the focus in the last frame.
 	typing := w.typing
 	w.typing = false
-	if w.commitOpen || w.paletteOpen || w.dialogOpen || w.help || typing || w.diffListEl == nil {
+	if w.commitOpen || w.paletteOpen || w.dialogOpen || w.help || typing || w.diffListEl == nil || (w.pr != nil && w.pr.submitOpen) {
 		return
 	}
 	if c.Shortcut(0, ui.KeyJ) || c.Shortcut(ui.Ctrl, ui.KeyDown) {

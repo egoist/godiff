@@ -596,3 +596,103 @@ func (r *Repo) ReadWorkTree(path string) []byte {
 	}
 	return data
 }
+
+// Remote is a remote of the repository.
+type Remote struct {
+	Name, URL string
+}
+
+// Remotes returns the repository's remotes, in the order of its
+// configuration.
+func (r *Repo) Remotes() []Remote {
+	out, err := r.Git("config", "--get-regexp", `^remote\..*\.url$`)
+	if err != nil {
+		return nil
+	}
+	var remotes []Remote
+	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+		key, url, ok := strings.Cut(line, " ")
+		if !ok {
+			continue
+		}
+		name := strings.TrimSuffix(strings.TrimPrefix(key, "remote."), ".url")
+		remotes = append(remotes, Remote{Name: name, URL: strings.TrimSpace(url)})
+	}
+	return remotes
+}
+
+// HasCommit reports whether the repository holds a commit.
+func (r *Repo) HasCommit(rev string) bool {
+	_, err := r.Git("cat-file", "-e", rev+"^{commit}")
+	return err == nil
+}
+
+// Fetch fetches refs of a remote, or of a URL, without their tags and
+// without asking for credentials: what it fetches is kept by the refs
+// alone, or until git collects it.
+func (r *Repo) Fetch(ctx context.Context, remote string, refspecs ...string) error {
+	args := append([]string{"-c", "credential.interactive=never", "fetch", "--no-tags", "--quiet", "--no-recurse-submodules", remote}, refspecs...)
+	ctx, cancel := context.WithTimeout(ctx, 3*time.Minute)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, binary(), args...)
+	proc.HideConsole(cmd)
+	cmd.Dir = r.Root
+	// SSH must fail rather than wait for a passphrase no one can type.
+	cmd.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0", "LC_ALL=C", "GIT_SSH_COMMAND="+sshCommand())
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		return &Error{Args: args, Stderr: stderr.String(), Err: err}
+	}
+	return nil
+}
+
+// sshCommand is the user's ssh, told never to ask anything.
+func sshCommand() string {
+	ssh := os.Getenv("GIT_SSH_COMMAND")
+	if ssh == "" {
+		ssh = "ssh"
+	}
+	return ssh + " -o BatchMode=yes"
+}
+
+// Range returns the changes of head since it branched from base, as a pull
+// request shows them: against their merge base, which it returns too.
+func (r *Repo) Range(base, head string, opts Options) ([]*diff.File, string, error) {
+	mb, err := r.MergeBase(base, head)
+	if err != nil {
+		return nil, "", fmt.Errorf("no common ancestor of %s and %s", shortRev(base), shortRev(head))
+	}
+	args := append(diffArgs(opts), mb, head, "--")
+	out, err := r.Git(args...)
+	if err != nil {
+		return nil, "", err
+	}
+	files := diff.Parse(out)
+	r.markGenerated(files, head)
+	SortFiles(files)
+	return files, mb, nil
+}
+
+// Subjects returns the subjects of the commits of base..head, oldest
+// first.
+func (r *Repo) Subjects(base, head string, limit int) []string {
+	out, err := r.Git("log", "--no-color", "--reverse", "--format=%h %s", "-n", strconv.Itoa(limit), base+".."+head, "--")
+	if err != nil {
+		return nil
+	}
+	var subjects []string
+	for _, l := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+		if l != "" {
+			subjects = append(subjects, l)
+		}
+	}
+	return subjects
+}
+
+func shortRev(rev string) string {
+	if len(rev) > 7 {
+		return rev[:7]
+	}
+	return rev
+}
