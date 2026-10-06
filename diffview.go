@@ -84,7 +84,11 @@ func (w *window) diffList(c *ui.Context) {
 	w.diffListEl = list
 
 	// The file at the top follows the scrolling, and the tree with it.
-	if first, _ := w.list.Visible(); first >= 0 && first < len(w.rows) && w.rows[first].kind != rowCommit {
+	first, _ := w.list.Visible()
+	for first >= 0 && first < len(w.rows) && w.rows[first].banner() {
+		first++
+	}
+	if first >= 0 && first < len(w.rows) {
 		file := int(w.rows[first].file)
 		if file != w.current && time.Since(w.revealedAt) > 1200*time.Millisecond {
 			w.current = file
@@ -110,12 +114,26 @@ func (w *window) revealFile(i int) {
 
 func (w *window) diffRow(c *ui.Context, pal *palette, i int) {
 	r := &w.rows[i]
-	if r.kind == rowCommit {
+	switch r.kind {
+	case rowCommit:
 		w.commitMessage(c, pal).Margin(12, 0, 0)
+		return
+	case rowPull:
+		w.pullHeader(c, pal).Margin(12, 0, 0)
+		return
+	case rowSummary:
+		w.summaryCard(c, pal).Margin(12, 0, 0)
+		return
+	case rowGroup:
+		w.groupRow(c, pal, int(r.gap))
 		return
 	}
 	f := w.files[r.file]
 	switch r.kind {
+	case rowThread:
+		w.threadRow(c, pal, f, r.thread)
+	case rowAINote:
+		w.noteRow(c, pal, r.note)
 	case rowHeader:
 		w.fileHeader(c, pal, int(r.file), f)
 	case rowNote:
@@ -251,6 +269,13 @@ func (w *window) fileHeader(c *ui.Context, pal *palette, idx int, f *fileState) 
 		if f.Generated {
 			ui.Text(c, "Generated").FontSize(11).FontWeight(600).Padding(4, 9).Radius(14).
 				Background(pal.ref.Alpha(0.15)).TextColor(pal.ref).Shrink(0)
+		}
+		if n := w.openThreads(f.Path); n > 0 {
+			ui.Row(c).Gap(4).Padding(4, 9).Radius(14).Background(pal.pill).TextColor(t.TextMuted).Shrink(0).
+				Tooltip(plural(n, "unresolved thread")).Children(func() {
+				ui.Icon(c, iconComment).FontSize(12)
+				ui.Text(c, itoa(n)).Font(w.codeFont()).FontSize(12).FontWeight(600)
+			})
 		}
 		w.viewedButton(c, pal, f, viewed)
 	})
@@ -663,7 +688,11 @@ func (w *window) commentRow(c *ui.Context, pal *palette, f *fileState, cm *comme
 				cm.focus = false
 			}
 			if area.Shortcut(ui.Cmd, ui.KeyEnter) {
-				w.focusList = true
+				if w.source.kind == sourcePull && w.pr.canWrite() {
+					w.postComment(cm, true)
+				} else {
+					w.focusList = true
+				}
 			}
 			if area.Shortcut(0, ui.KeyEscape) {
 				if cm.pending() {
@@ -684,6 +713,9 @@ func (w *window) commentRow(c *ui.Context, pal *palette, f *fileState, cm *comme
 			cm.wasFocused = focused
 			if focused {
 				box.Border(1, t.Accent.Alpha(0.6))
+			}
+			if w.source.kind == sourcePull {
+				w.prCommentActions(c, pal, cm)
 			}
 		})
 	})

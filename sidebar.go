@@ -18,7 +18,9 @@ import (
 type treeNode struct {
 	name     string
 	dir      bool
-	file     int // the file's index in window.files
+	file     int    // the file's index in window.files
+	path     string // a directory's
+	group    int    // a group's index, -1 for the others
 	children []string
 }
 
@@ -92,7 +94,8 @@ func (w *window) fileNote(f *fileState) string {
 	return ""
 }
 
-// buildTree lays out the tree of the files that show.
+// buildTree lays out the tree of the files that show: under their groups,
+// when the files are grouped.
 func (w *window) buildTree() {
 	type dirNode struct {
 		dirs  map[string]*dirNode
@@ -100,56 +103,82 @@ func (w *window) buildTree() {
 		files map[string]int
 	}
 	newDir := func() *dirNode { return &dirNode{dirs: map[string]*dirNode{}, files: map[string]int{}} }
-	root := newDir()
+	items := map[string]*treeNode{}
+	// tree builds the directories of some files, their keys made unique
+	// by prefix.
+	tree := func(files []int, prefix string) []string {
+		root := newDir()
+		for _, i := range files {
+			f := w.files[i]
+			parts := strings.Split(f.Path, "/")
+			d := root
+			for _, p := range parts[:len(parts)-1] {
+				next := d.dirs[p]
+				if next == nil {
+					next = newDir()
+					d.dirs[p] = next
+					d.order = append(d.order, "d"+p)
+				}
+				d = next
+			}
+			name := parts[len(parts)-1]
+			d.files[name] = i
+			d.order = append(d.order, "f"+name)
+		}
+		var walk func(d *dirNode, path string) []string
+		walk = func(d *dirNode, path string) []string {
+			var keys []string
+			for _, o := range d.order {
+				name := o[1:]
+				if o[0] == 'f' {
+					i := d.files[name]
+					key := "f:" + w.files[i].Path
+					items[key] = &treeNode{name: name, file: i, group: -1}
+					keys = append(keys, key)
+					continue
+				}
+				sub := d.dirs[name]
+				label := name
+				dir := path + name
+				// Directories holding one directory alone join it.
+				for len(sub.order) == 1 && sub.order[0][0] == 'd' {
+					child := sub.order[0][1:]
+					label += "/" + child
+					dir += "/" + child
+					sub = sub.dirs[child]
+				}
+				key := "d:" + prefix + dir
+				items[key] = &treeNode{name: label, dir: true, file: -1, path: dir, group: -1, children: walk(sub, dir+"/")}
+				keys = append(keys, key)
+			}
+			return keys
+		}
+		return walk(root, "")
+	}
+	byGroup := make([][]int, len(w.groups))
+	var ungrouped []int
 	for i, f := range w.files {
 		if !w.fileVisible(i) {
 			continue
 		}
-		parts := strings.Split(f.Path, "/")
-		d := root
-		for _, p := range parts[:len(parts)-1] {
-			next := d.dirs[p]
-			if next == nil {
-				next = newDir()
-				d.dirs[p] = next
-				d.order = append(d.order, "d"+p)
-			}
-			d = next
+		if f.group >= 0 && f.group < len(w.groups) {
+			byGroup[f.group] = append(byGroup[f.group], i)
+		} else {
+			ungrouped = append(ungrouped, i)
 		}
-		name := parts[len(parts)-1]
-		d.files[name] = i
-		d.order = append(d.order, "f"+name)
 	}
-	items := map[string]*treeNode{}
-	var walk func(d *dirNode, prefix string) []string
-	walk = func(d *dirNode, prefix string) []string {
-		var keys []string
-		for _, o := range d.order {
-			name := o[1:]
-			if o[0] == 'f' {
-				i := d.files[name]
-				key := "f:" + w.files[i].Path
-				items[key] = &treeNode{name: name, file: i}
-				keys = append(keys, key)
-				continue
-			}
-			sub := d.dirs[name]
-			label := name
-			path := prefix + name
-			// Directories holding one directory alone join it.
-			for len(sub.order) == 1 && sub.order[0][0] == 'd' {
-				child := sub.order[0][1:]
-				label += "/" + child
-				path += "/" + child
-				sub = sub.dirs[child]
-			}
-			key := "d:" + path
-			items[key] = &treeNode{name: label, dir: true, file: -1, children: walk(sub, path+"/")}
-			keys = append(keys, key)
+	var roots []string
+	for gi, files := range byGroup {
+		if len(files) == 0 {
+			continue
 		}
-		return keys
+		g := w.groups[gi]
+		key := "g:" + g.key
+		items[key] = &treeNode{name: g.label, dir: true, file: -1, group: gi, children: tree(files, g.key+":")}
+		roots = append(roots, key)
 	}
-	w.treeRoots = walk(root, "")
+	roots = append(roots, tree(ungrouped, "")...)
+	w.treeRoots = roots
 	w.treeItems = items
 }
 
@@ -239,21 +268,30 @@ func (w *window) sidebar(c *ui.Context) {
 				ui.Spacer(c)
 			}
 		})
+		if w.tab == 2 && !w.gh.ok() {
+			w.tab = 0
+		}
 		ui.Column(c).Padding(2, 10, 8).Children(func() {
-			if w.tab == 0 {
+			switch w.tab {
+			case 0:
 				if searchInput(c, &w.filter, "Filter files", &w.filterFocus, &w.typing) {
 					w.matchesFor = "\x00"
 					w.buildTree()
 					w.rowsDirty = true
 				}
-			} else {
+			case 1:
 				searchInput(c, &w.historyFilter, "Filter history", &w.filterFocus, &w.typing)
+			default:
+				searchInput(c, &w.pullsFilter, "Filter pull requests", &w.filterFocus, &w.typing)
 			}
 		})
-		if w.tab == 0 {
+		switch w.tab {
+		case 0:
 			w.fileTree(c)
-		} else {
+		case 1:
 			w.historyView(c)
+		default:
+			w.pullsView(c)
 		}
 		w.sidebarFooter(c, pal)
 	})
@@ -275,18 +313,23 @@ func (w *window) sidebarBg(t *ui.Theme) ui.Color {
 // their controls on the traffic lights of a window with an inset title bar.
 const titleBarHeight = 52
 
-// tabControl switches the sidebar between the files and the history, and
-// reports a switch.
+// tabControl switches the sidebar between the files, the history and the
+// pull requests, and reports a switch.
 func (w *window) tabControl(c *ui.Context) bool {
 	t := c.Theme()
 	pal := paletteFor(t)
 	tab := w.tab
-	seg := ui.SegmentedBase(c, &tab, 2)
+	type item struct {
+		icon *ui.SVG
+		name string
+	}
+	items := []item{{iconTree, "Files (⌘1)"}, {iconHistory, "History (⌘2)"}}
+	if w.gh.ok() {
+		items = append(items, item{iconPull, "Pull Requests (⌘3)"})
+	}
+	seg := ui.SegmentedBase(c, &tab, len(items))
 	seg.Track.Padding(2).Gap(2).Radius(8).Background(ui.RGBA(127, 127, 127, 0.12)).Label("Sidebar").Children(func() {
-		for i, it := range []struct {
-			icon *ui.SVG
-			name string
-		}{{iconTree, "Files (⌘1)"}, {iconHistory, "History (⌘2)"}} {
+		for i, it := range items {
 			s := seg.Segment(i).Size(30, 24).Radius(6).Center().Label(it.name).Tooltip(it.name).TextColor(t.TextMuted)
 			if i == tab {
 				s.Background(pal.headerBg).Shadow(0, 1, 2, 0, ui.RGBA(0, 0, 0, 0.12)).TextColor(t.Text)
@@ -460,6 +503,16 @@ func (w *window) fileTree(c *ui.Context) {
 					}
 					ic.Rotate(ic.Animate("rot", target, 150*time.Millisecond))
 				})
+				if n.group >= 0 && n.group < len(w.groups) {
+					g := &w.groups[n.group]
+					icon := ui.Icon(c, groupIcon(g)).FontSize(14).TextColor(muted)
+					if g.critical && !(selected && focused) {
+						icon.TextColor(t.Danger)
+					}
+					ui.Text(c, n.name).FontSize(13).FontWeight(600).SingleLine().Grow(1).Shrink(1).MinWidth(0).Tooltip(g.summary)
+					ui.Textf(c, "%d", w.treeCount(key)).Font(w.codeFont()).FontSize(10).FontWeight(600).TextColor(muted).Shrink(0)
+					return
+				}
 				ui.Icon(c, iconFolder).FontSize(14).TextColor(muted)
 				ui.Text(c, n.name).FontSize(13).SingleLine().Grow(1).Shrink(1).MinWidth(0)
 				return
@@ -541,6 +594,22 @@ func (w *window) fileTree(c *ui.Context) {
 	}
 }
 
+// treeCount counts the files under a row of the tree.
+func (w *window) treeCount(key string) int {
+	n := w.treeItems[key]
+	if n == nil {
+		return 0
+	}
+	if !n.dir {
+		return 1
+	}
+	total := 0
+	for _, k := range n.children {
+		total += w.treeCount(k)
+	}
+	return total
+}
+
 // selectTreeFile chooses a file's row in the tree, as the surface
 // scrolls to it.
 func (w *window) selectTreeFile(i int) {
@@ -549,9 +618,12 @@ func (w *window) selectTreeFile(i int) {
 		return
 	}
 	w.treeSel = key
-	// The directories holding it open.
+	// The directories holding it open, and its group.
 	for k, n := range w.treeItems {
-		if n.dir && w.closedDirs[k] && strings.HasPrefix(w.files[i].Path, strings.TrimPrefix(k, "d:")+"/") {
+		if !n.dir || !w.closedDirs[k] {
+			continue
+		}
+		if (n.group >= 0 && n.group == w.files[i].group) || (n.path != "" && strings.HasPrefix(w.files[i].Path, n.path+"/")) {
 			w.closedDirs[k] = false
 		}
 	}
@@ -585,7 +657,7 @@ func (w *window) historyView(c *ui.Context) {
 	target := w.source
 	current := -1
 	for i, e := range entries {
-		if (e.local && target.kind != sourceCommit) || (e.commit != nil && target.kind == sourceCommit && target.ref == e.commit.Hash) {
+		if (e.local && (target.kind == sourceWorkingTree || target.kind == sourceBranch)) || (e.commit != nil && target.kind == sourceCommit && target.ref == e.commit.Hash) {
 			current = i
 		}
 	}
@@ -703,8 +775,12 @@ func (w *window) launchWorkTree() source {
 	return source{kind: sourceWorkingTree}
 }
 
-// relativeTime writes how long ago t was: just now, 5m ago, 3d ago.
+// relativeTime writes how long ago t was: just now, 5m ago, 3d ago; ""
+// for no time.
 func relativeTime(now, t time.Time) string {
+	if t.IsZero() {
+		return ""
+	}
 	d := now.Sub(t)
 	switch {
 	case d < time.Minute:

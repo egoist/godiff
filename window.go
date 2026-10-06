@@ -16,6 +16,7 @@ import (
 
 	"github.com/egoist/godiff/internal/diff"
 	"github.com/egoist/godiff/internal/git"
+	"github.com/egoist/godiff/internal/github"
 	"github.com/egoist/godiff/internal/highlight"
 	"github.com/egoist/mygo"
 	"github.com/egoist/mygo/ui"
@@ -28,11 +29,12 @@ const (
 	sourceWorkingTree sourceKind = iota // uncommitted changes
 	sourceCommit                        // a commit, against its first parent
 	sourceBranch                        // the work tree since it branched from a branch
+	sourcePull                          // a pull request on GitHub, since it branched
 )
 
 type source struct {
 	kind sourceKind
-	ref  string // the commit, or the branch
+	ref  string // the commit, the branch, or the pull request as owner/repo#123
 }
 
 // historyPage is how many commits the History tab loads at a time: git
@@ -58,7 +60,7 @@ type window struct {
 	branch     string
 	files      []*fileState
 	commit     *git.Commit // the commit reviewed, for sourceCommit
-	base       string      // the merge base, for sourceBranch
+	base       string      // the merge base, for sourceBranch and sourcePull
 	loading    bool
 	loadedOnce bool
 	loadErr    error
@@ -67,6 +69,8 @@ type window struct {
 	// loadStart is when the load started.
 	loadStart time.Time
 	viewed    map[string]string
+	// loadStatus says what a slow load does, as fetching a pull request.
+	loadStatus string
 
 	// The sidebar.
 	sidebarShown bool
@@ -129,6 +133,32 @@ type window struct {
 
 	// The reviews of the other sources.
 	sessions map[source]*session
+
+	// GitHub: the repository's remote there, its open pull requests, and
+	// the pull requests reviewed, the one shown in pr.
+	gh           ghRemote
+	pulls        []github.Summary
+	pullsLoaded  bool
+	pullsLoading bool
+	pullsErr     error
+	pullsList    ui.ListState
+	pullsEl      *ui.Element
+	pullsFilter  string
+	pr           *pullState
+	prs          map[source]*pullState
+
+	// The groups of the files: by kind, or as an agent's review has them.
+	groupPref groupMode
+	groups    []fileGroup
+	// notes are the notes of the agent's review, by path.
+	notes map[string][]*aiNote
+	// regroupPending groups the files again as the next frame starts.
+	regroupPending bool
+	// placed are the threads and notes the rows show under their lines,
+	// as the rows are built: the others show at the end of their files.
+	placed map[any]bool
+	// The agents' reviews, by source.
+	analyses map[source]*analysisState
 	// Review comments, the one asked about discarding, and the git user.
 	comments   []*comment
 	discarding *comment
@@ -186,6 +216,13 @@ func openWindow(dir string, src source) error {
 			return err
 		}
 		src.ref = hash
+	}
+	if src.kind == sourcePull {
+		ref, err := resolvePull(repo, src.ref)
+		if err != nil {
+			return err
+		}
+		src.ref = ref
 	}
 	// A repository already open comes to the front.
 	windowsMu.Lock()
@@ -256,7 +293,7 @@ func newWindow(repo *git.Repo, src source) *window {
 		sidebarShown: shown,
 		sidebarWidth: width,
 		historyLimit: historyPage,
-		viewed:       state.viewed(repo.Root),
+		viewed:       state.viewed(viewedKey(repo.Root, src)),
 		hscroll:      map[string]float32{},
 		closedDirs:   map[string]bool{},
 		commitTimes:  map[string]commitTime{},
@@ -264,7 +301,14 @@ func newWindow(repo *git.Repo, src source) *window {
 		fileMatches:  map[int]bool{},
 		selFile:      -1,
 		selHunk:      -1,
+		prs:          map[source]*pullState{},
+		analyses:     map[source]*analysisState{},
 	}
+	w.gh, _ = findGitHubRemote(repo, github.Repo{})
+	if src.kind == sourcePull {
+		w.pr = w.pullFor(src)
+	}
+	w.loadAnalysis(src)
 	w.dragWidth = w.sidebarWidth
 	w.list.Key = func(i int) any { return w.key(&w.rows[i]) }
 	w.list.Header = func(i int) bool { return w.rows[i].kind == rowHeader }
@@ -279,6 +323,9 @@ func windowTitle(root string, src source) string {
 		name += "/" + shortHash(src.ref)
 	case sourceBranch:
 		name += "/" + src.ref
+	case sourcePull:
+		_, n := src.pull()
+		name += fmt.Sprintf("/#%d", n)
 	}
 	return name + " · Godiff"
 }
@@ -397,12 +444,17 @@ func (w *window) switchTo(src source) {
 	}
 	if w.viewed == nil {
 		w.viewed = map[string]string{}
-		if src.kind != sourceCommit {
-			w.viewed = state.viewed(w.repo.Root)
+		if key := viewedKey(w.repo.Root, src); key != "" {
+			w.viewed = state.viewed(key)
 		}
 	}
 	w.source = src
-	w.files, w.rows, w.commit = nil, nil, nil
+	w.files, w.rows, w.commit, w.groups = nil, nil, nil, nil
+	w.pr = nil
+	if src.kind == sourcePull {
+		w.pr = w.pullFor(src)
+	}
+	w.loadAnalysis(src)
 	// The tree refers to the files by their index: it goes with them.
 	w.buildTree()
 	w.loadErr = nil
@@ -442,6 +494,8 @@ func (w *window) load() {
 	}
 	branch := w.branch
 	needBranch := src.kind != sourceCommit || branch == ""
+	remote := w.pullRemote(src)
+	w.loadStatus = ""
 	// Files unchanged since the last load keep their contents.
 	loadedFiles := map[string]bool{}
 	for _, f := range w.files {
@@ -454,6 +508,7 @@ func (w *window) load() {
 			files  []*diff.File
 			commit = known
 			base   string
+			pulled pulledRequest
 			err    error
 			wg     sync.WaitGroup
 		)
@@ -481,6 +536,9 @@ func (w *window) load() {
 		case sourceBranch:
 			sig = w.repo.StatusSignature()
 			files, base, err = w.repo.Compare(src.ref, opts)
+		case sourcePull:
+			pulled, err = w.fetchPull(gen, src, remote, opts)
+			files, base = pulled.files, pulled.mergeBase
 		}
 		wg.Wait()
 		// The revisions of the old and the new side; "" is the work tree.
@@ -497,6 +555,8 @@ func (w *window) load() {
 			newRev = src.ref
 		case sourceBranch:
 			oldRev = base
+		case sourcePull:
+			oldRev, newRev = base, pulled.head
 		}
 		var pre map[string]loaded
 		if err == nil && !w.stale(gen) {
@@ -516,9 +576,14 @@ func (w *window) load() {
 			}
 			w.loading = false
 			w.loadErr = err
+			w.loadStatus = ""
 			w.branch = branch
 			if err == nil {
 				w.commit = commit
+			}
+			if src.kind == sourcePull && err == nil {
+				w.pr.apply(pulled)
+				w.loadReviews()
 			}
 			w.base = base
 			if sig != "" {
@@ -531,7 +596,7 @@ func (w *window) load() {
 					l.apply()
 				}
 			}
-			if !w.loadedOnce && len(files) == 0 && src.kind != sourceCommit {
+			if !w.loadedOnce && len(files) == 0 && src.kind != sourceCommit && src.kind != sourcePull {
 				// Nothing to review: the history shows instead, and takes
 				// the keys in place of the review.
 				w.tab = 1
@@ -630,9 +695,7 @@ func (w *window) setFiles(files []*diff.File) {
 		next = append(next, fs)
 	}
 	w.files = next
-	w.matchesFor = "\x00" // find again
-	w.buildTree()
-	w.rowsDirty = true
+	w.regroup()
 	w.pruneComments()
 }
 
@@ -649,9 +712,10 @@ func (w *window) setViewed(f *fileState, viewed bool) {
 	} else {
 		delete(w.viewed, f.Path)
 	}
-	// Only the work tree's files are remembered: commits do not change.
-	if w.source.kind != sourceCommit {
-		go state.setViewed(w.repo.Root, f.Path, fp)
+	// Only the work tree's and pull requests' files are remembered:
+	// commits do not change.
+	if key := viewedKey(w.repo.Root, w.source); key != "" {
+		go state.setViewed(key, f.Path, fp)
 	}
 	f.collapsed = viewed
 	w.rowsDirty = true
@@ -915,6 +979,10 @@ func (w *window) checkChanges() {
 	var sig string
 	var busy bool
 	mygo.RunOnMain(func() { src, sig, busy = w.source, w.signature, w.loading || w.changed })
+	if src.kind == sourcePull && !busy {
+		w.checkPull(src)
+		return
+	}
 	if busy || sig == "" || src.kind == sourceCommit {
 		return
 	}
@@ -927,10 +995,14 @@ func (w *window) checkChanges() {
 	}
 }
 
-// refresh loads the source again, and the history.
+// refresh loads the source again, and the history, and the pull
+// requests once listed.
 func (w *window) refresh() {
 	w.load()
 	w.loadHistory()
+	if w.pullsLoaded {
+		w.loadPulls()
+	}
 }
 
 // openInEditor opens a file of the repository in the user's editor, at a

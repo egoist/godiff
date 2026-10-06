@@ -27,6 +27,22 @@ dark mode, menus and vibrancy.
   sidebar's Commit button. Other staged work stays staged.
 - **History**: browse commits and review any of them, or compare the work
   tree with a branch.
+- **Pull requests**, after [pulls.review](https://github.com/antfu/pulls.review):
+  list the open pull requests of the repository's GitHub remote
+  (<kbd>⌘3</kbd>) and review any of them, open or not. Godiff fetches its
+  commits into your clone, so it reads as local changes do: highlighted,
+  expandable, with pictures. Its files group by kind (code, tests, docs,
+  config, dependencies, generated), each group with how much of it you
+  viewed; review threads show under their lines, to reply to and resolve;
+  comments go out alone or into your review, which you submit as a comment,
+  an approval or a request for changes. A banner says when new commits are
+  pushed.
+- **AI review**: a coding agent installed on your machine — Claude Code,
+  Codex, OpenCode or Pi — reviews the changes, a pull request's or your
+  own: it summarizes them, groups the files by intent, and notes the lines
+  that deserve attention, marking what needs care. It runs read-only, with
+  the agent's own sign-in, and its review is kept until you ask for
+  another.
 - **Find in diffs** (<kbd>⌘F</kbd>), a **file filter** (<kbd>⌘P</kbd>) and a
   **command bar** (<kbd>⌘K</kbd>).
 - Image previews of changed pictures, a file tree with change counts and
@@ -35,13 +51,16 @@ dark mode, menus and vibrancy.
 ## Usage
 
 ```sh
-go run . [<commit> | <branch>] [<path>]
+go run . [<commit> | <branch> | <pull request>] [<path>]
 ```
 
 - `godiff` reviews the uncommitted changes of the repository you are in.
 - `godiff HEAD~1` reviews a commit, against its first parent.
 - `godiff main` compares the work tree, committed or not, with where it
   branched off `main`.
+- `godiff --pr 123`, `godiff owner/repo#123` or `godiff
+  https://github.com/owner/repo/pull/123` reviews a pull request of the
+  repository's GitHub remote (`upstream`, else `origin`).
 - `godiff ../other-repo` opens another repository.
 
 Every repository opens in a window of its own. **Godiff → Install Command Line
@@ -59,7 +78,8 @@ runs in.
 | <kbd>Enter</kbd> | Comment on the hunk chosen |
 | <kbd>⌘↩</kbd> | Add the comment; commit, in the commit view |
 | <kbd>⌘⇧B</kbd> | Toggle the sidebar |
-| <kbd>⌘1</kbd> / <kbd>⌘2</kbd> | Files / History |
+| <kbd>⌘1</kbd> / <kbd>⌘2</kbd> / <kbd>⌘3</kbd> | Files / History / Pull requests |
+| <kbd>⌘⇧I</kbd> | Review with AI |
 | <kbd>⌥Z</kbd> | Toggle word wrap |
 | <kbd>⌘⇧O</kbd> | Open the file in your editor |
 | <kbd>⌘R</kbd> | Refresh the changes |
@@ -79,6 +99,9 @@ with codiff's names, and apply to open windows as the file changes:
     "copyCommentsOnClose": false,
     "diffStyle": "split",          // or "unified"
     "editorCommand": "",           // e.g. "zed {file}:{line}"
+    "githubToken": "",             // empty uses the GitHub CLI's (gh auth login)
+    "aiAgent": "",                 // claude, codex, opencode or pi; empty is the first installed
+    "aiModel": "",                 // e.g. "sonnet"; empty is the agent's default
     "reviewCommentsPrefix": "# Address these Review Comments",
     "sidebarPosition": "left",     // or "right"
     "showWhitespace": false,
@@ -90,6 +113,10 @@ with codiff's names, and apply to open windows as the file changes:
 
 Files open in `$GODIFF_EDITOR` or `editorCommand` (`{file}`, `{line}` and
 `{repo}` are replaced), else VS Code, else the app the system opens them with.
+
+Pull requests need no token to be read when they are public; to comment
+and review, or to read private ones, sign in with the GitHub CLI (`gh auth
+login`), or set `githubToken` or `$GH_TOKEN`.
 
 ## Development
 

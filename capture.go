@@ -19,6 +19,8 @@ func (w *window) captureIfAsked() {
 	}
 	go func() {
 		time.Sleep(2500 * time.Millisecond)
+		// A pull request loads from GitHub, which takes its time.
+		w.waitFor(time.Minute, func() bool { return !w.loading })
 		if setup := os.Getenv("GODIFF_CAPTURE_SETUP"); setup != "" {
 			var prof *os.File
 			if path := os.Getenv("GODIFF_CPUPROFILE"); path != "" {
@@ -34,6 +36,13 @@ func (w *window) captureIfAsked() {
 			}
 			w.win.Update(func() { w.debugSetup(setup) })
 			time.Sleep(1200 * time.Millisecond)
+			if setup == "ai" {
+				w.waitFor(10*time.Minute, func() bool {
+					st := w.analyses[w.source]
+					return st == nil || !st.running
+				})
+				time.Sleep(500 * time.Millisecond)
+			}
 			if prof != nil {
 				pprof.StopCPUProfile()
 				prof.Close()
@@ -77,5 +86,20 @@ func (w *window) debugSetup(setup string) {
 	case "wrap":
 		w.settings.WordWrap = true
 		w.rowsDirty = true
+	case "pulls":
+		w.showPulls()
+	case "ai":
+		w.runAnalysis()
+	}
+}
+
+// waitFor waits until a condition of the window holds, or a while.
+func (w *window) waitFor(limit time.Duration, done func() bool) {
+	for end := time.Now().Add(limit); time.Now().Before(end); time.Sleep(200 * time.Millisecond) {
+		var ok bool
+		mygo.RunOnMain(func() { ok = done() })
+		if ok {
+			return
+		}
 	}
 }

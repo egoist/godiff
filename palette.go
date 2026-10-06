@@ -3,6 +3,8 @@ package main
 import (
 	"strings"
 
+	"github.com/egoist/godiff/internal/agent"
+	"github.com/egoist/godiff/internal/github"
 	"github.com/egoist/mygo"
 	"github.com/egoist/mygo/ui"
 )
@@ -38,9 +40,16 @@ func (w *window) commands() []command {
 		{title: "Find in Diffs", keys: "⌘F", run: func() { w.finding = true }},
 		{title: "Open Commit", hint: "Review a commit", run: func() { w.openDialog(dialogCommit) }},
 		{title: "Open Branch", hint: "Compare with a branch", run: func() { w.openDialog(dialogBranch) }},
+		{title: "Open Pull Request", hint: "Review a pull request on GitHub", run: func() { w.openDialog(dialogPull) }},
 		{title: "Open Folder", keys: "⌘O", run: openFolder},
 		{title: "Show File Tree", run: func() { w.tab, w.sidebarShown = 0, true }},
 		{title: "Show History", run: func() { w.tab, w.sidebarShown = 1, true }},
+		{title: "Show Pull Requests", keys: "⌘3", run: w.showPulls},
+		{title: "Review with AI", hint: w.agentHint(), keys: "⌘⇧I", run: w.reviewWithAI},
+		{title: "Stop the AI Review", run: w.stopAnalysis},
+		{title: "Group Files by Kind", run: func() { w.chooseGrouping(groupKind) }},
+		{title: "Group Files by AI Review", run: func() { w.chooseGrouping(groupAI) }},
+		{title: "Ungroup Files", run: func() { w.chooseGrouping(groupNone) }},
 		{title: "Show Uncommitted Changes", run: func() { w.setSource(w.launchWorkTree()) }},
 		{title: "Commit…", run: func() {
 			if w.source.kind == sourceWorkingTree && !w.commitOpen {
@@ -48,6 +57,8 @@ func (w *window) commands() []command {
 			}
 		}},
 		{title: "Copy Review Comments", run: w.copyComments},
+		{title: "Submit Review", hint: "Approve, comment or request changes", run: w.openSubmit},
+		{title: "Open Pull Request on GitHub", run: w.openPullOnGitHub},
 		{title: "Copy Review Comments and Close", run: func() {
 			w.copyComments()
 			if w.win != nil {
@@ -249,6 +260,7 @@ const (
 	dialogNone dialogKind = iota
 	dialogCommit
 	dialogBranch
+	dialogPull
 )
 
 func (w *window) openDialog(k dialogKind) {
@@ -265,8 +277,11 @@ func (w *window) sourceDialog(c *ui.Context) {
 		return
 	}
 	title, desc, label, placeholder := "Open Commit", "Review a commit by SHA or revision, such as HEAD~1.", "Commit", "HEAD~1 or a commit SHA"
-	if w.dialog == dialogBranch {
+	switch w.dialog {
+	case dialogBranch:
 		title, desc, label, placeholder = "Open Branch", "Compare the current working tree with a branch.", "Branch name", "main"
+	case dialogPull:
+		title, desc, label, placeholder = "Open Pull Request", "Review a pull request of this repository on GitHub, open or not.", "Pull request", "123, owner/repo#123 or its URL"
 	}
 	open := func() {
 		v := strings.TrimSpace(w.dialogValue)
@@ -281,7 +296,13 @@ func (w *window) sourceDialog(c *ui.Context) {
 		kind := w.dialog
 		w.dialogBusy = true
 		w.background(func() {
-			hash, err := w.repo.Resolve(v)
+			var hash string
+			var err error
+			if kind == dialogPull {
+				hash, err = resolvePull(w.repo, v)
+			} else {
+				hash, err = w.repo.Resolve(v)
+			}
 			w.update(func() {
 				w.dialogBusy = false
 				if !w.dialogOpen || w.dialog != kind {
@@ -292,6 +313,9 @@ func (w *window) sourceDialog(c *ui.Context) {
 					w.dialogErr = "Branch \"" + v + "\" does not exist in this repository."
 				case err != nil:
 					w.dialogErr = err.Error()
+				case kind == dialogPull:
+					w.dialogOpen = false
+					w.setSource(source{kind: sourcePull, ref: hash})
 				case kind == dialogCommit:
 					w.dialogOpen = false
 					w.setSource(source{kind: sourceCommit, ref: hash})
@@ -343,6 +367,7 @@ func (w *window) shortcutsHelp(c *ui.Context) {
 			{"Toggle sidebar", "⌘⇧B"}, {"Toggle word wrap", "⌥Z"}, {"Open file in editor", "⌘⇧O"}, {"Refresh changes", "⌘R"}}},
 		{"Search", [][2]string{{"Find in diffs", "⌘F"}, {"Next match", "↩"}, {"Previous match", "⇧↩"}, {"Close search", "Esc"}}},
 		{"Comments", [][2]string{{"Comment on a line", "Click"}, {"Comment on the hunk", "↩"}, {"Add comment", "⌘↩"}, {"Discard comment", "Esc"}}},
+		{"Pull requests", [][2]string{{"Pull requests", "⌘3"}, {"Review with AI", "⌘⇧I"}, {"Add to your review", "⌘↩"}, {"Reply", "⌘↩"}}},
 		{"Code", [][2]string{{"Bigger text", "⌘+"}, {"Smaller text", "⌘-"}, {"Actual size", "⌘0"}}},
 	}
 	ui.Modal(c, &w.help, func() {
@@ -368,4 +393,39 @@ func (w *window) shortcutsHelp(c *ui.Context) {
 			})
 		})
 	})
+}
+
+// showPulls shows the pull requests in the sidebar.
+func (w *window) showPulls() {
+	if !w.gh.ok() {
+		w.openDialog(dialogPull)
+		return
+	}
+	w.tab, w.sidebarShown = 2, true
+}
+
+// openSubmit opens the dialog submitting the review of the pull request
+// shown.
+func (w *window) openSubmit() {
+	if p := w.pr; p != nil && p.canWrite() {
+		p.submitOpen = true
+		p.submitErr = ""
+		if p.submitEvent == "" {
+			p.submitEvent = github.VerdictComment
+		}
+	}
+}
+
+func (w *window) openPullOnGitHub() {
+	if w.pr != nil && w.pr.meta != nil && w.win != nil {
+		mygo.Shell.OpenExternal(w.pr.meta.HTMLURL)
+	}
+}
+
+// agentHint names the agent that reviews.
+func (w *window) agentHint() string {
+	if a, ok := agent.ByName(w.settings.AIAgent); ok {
+		return a.Label
+	}
+	return "Claude Code, Codex, OpenCode or Pi"
 }

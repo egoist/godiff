@@ -27,6 +27,10 @@ type comment struct {
 	text       string
 	focus      bool // takes the focus as it is built
 	wasFocused bool
+	// posting is set while the comment goes to GitHub, postErr when it
+	// could not.
+	posting bool
+	postErr string
 }
 
 func (c *comment) pending() bool { return strings.TrimSpace(c.text) != "" }

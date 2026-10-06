@@ -5,6 +5,8 @@
 //	godiff <path>          those of another repository
 //	godiff <commit>        a commit, as HEAD~1 or a1b2c3d
 //	godiff <branch>        the work tree's changes since it branched off
+//	godiff --pr <number>   a pull request on GitHub, as owner/repo#123 or
+//	                       its URL too
 package main
 
 import (
@@ -21,19 +23,22 @@ import (
 	"time"
 
 	"github.com/egoist/godiff/internal/git"
+	"github.com/egoist/godiff/internal/github"
 	"github.com/egoist/mygo"
 	"github.com/egoist/mygo/ui"
 )
 
-const usage = `Usage: godiff [<commit> | <branch>] [<path>]
+const usage = `Usage: godiff [<commit> | <branch> | <pull request>] [<path>]
 
 Review the uncommitted changes of the Git repository at <path> (default:
-the current directory), a commit, or the work tree's changes since it
-branched off <branch>.
+the current directory), a commit, the work tree's changes since it
+branched off <branch>, or a pull request on GitHub, named as
+owner/repo#123 or by its URL.
 
 Options:
   --commit <ref>   review a commit
   --branch <ref>   compare the work tree with a branch
+  --pr <number>    review a pull request of the repository's GitHub remote
   --cwd <dir>      the directory relative paths start from
   -h, --help       show this help
 `
@@ -55,6 +60,14 @@ func parseArgs(args []string, dir string) (request, error) {
 		switch {
 		case a == "-h" || a == "--help":
 			return req, errHelp
+		case a == "--pr":
+			if i+1 >= len(args) {
+				return req, fmt.Errorf("--pr needs a pull request")
+			}
+			i++
+			req.src = source{kind: sourcePull, ref: args[i]}
+		case isPullArg(a):
+			req.src = source{kind: sourcePull, ref: a}
 		case a == "--commit" || a == "--branch":
 			if i+1 >= len(args) {
 				return req, fmt.Errorf("%s needs a revision", a)
@@ -86,6 +99,15 @@ func parseArgs(args []string, dir string) (request, error) {
 		req.src = source{kind: sourceBranch, ref: a}
 	}
 	// A revision is a commit unless it names a branch.
+	if req.src.kind == sourcePull {
+		if repo, err := git.Open(req.dir); err == nil {
+			ref, err := resolvePull(repo, req.src.ref)
+			if err != nil {
+				return req, err
+			}
+			req.src.ref = ref
+		}
+	}
 	if req.src.kind == sourceBranch && req.src.ref != "" {
 		if repo, err := git.Open(req.dir); err == nil {
 			_, local := repo.Git("show-ref", "--verify", "--quiet", "refs/heads/"+req.src.ref)
@@ -103,6 +125,13 @@ func parseArgs(args []string, dir string) (request, error) {
 }
 
 var errHelp = fmt.Errorf("help")
+
+// isPullArg reports whether an argument names a pull request: its URL,
+// owner/repo#123 or #123.
+func isPullArg(a string) bool {
+	_, _, ok := github.ParsePull(a)
+	return ok
+}
 
 func resolve(dir, p string) string {
 	if strings.HasPrefix(p, "~/") {
@@ -261,6 +290,7 @@ func main() {
 			}()
 		}
 	}
+	fetchAvatars, detectAgents = true, true
 	mygo.App.WhenReady(func() {
 		if debugFrames {
 			go watchMainThread()
