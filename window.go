@@ -79,7 +79,6 @@ type window struct {
 	filter       string
 	filterFocus  bool
 	treeList     ui.ListState
-	treeEl       *ui.Element
 	treeSel      string // the key of the row chosen
 	treeRows     []treeRow
 	closedDirs   map[string]bool
@@ -89,7 +88,6 @@ type window struct {
 	historyLimit int
 	historyMore  bool
 	historyList  ui.ListState
-	historyEl    *ui.Element
 	commitTimes  map[string]commitTime
 	// historyFilter filters the History tab, apart from the files'.
 	historyFilter  string
@@ -104,7 +102,6 @@ type window struct {
 	list       ui.ListState
 	current    int // the file shown at the top of the surface
 	hscroll    map[string]float32
-	diffListEl *ui.Element
 	revealedAt time.Time
 	now        time.Time
 	charW      float32
@@ -142,7 +139,6 @@ type window struct {
 	pullsLoading bool
 	pullsErr     error
 	pullsList    ui.ListState
-	pullsEl      *ui.Element
 	pullsFilter  string
 	pr           *pullState
 	prs          map[source]*pullState

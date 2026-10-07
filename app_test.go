@@ -193,6 +193,21 @@ func TestComments(t *testing.T) {
 	}
 }
 
+func TestReviewShortcutsFromSidebar(t *testing.T) {
+	w, tt := newTestWindow(t, testRepo(t))
+	if err := tt.Click("old.txt"); err != nil {
+		t.Fatal(err)
+	}
+	if !tt.Focused("Changed files") {
+		t.Fatal("the sidebar did not take focus")
+	}
+	tt.Key(0, ui.KeyJ)
+	tt.Key(0, ui.KeyEnter)
+	if len(w.comments) != 1 {
+		t.Fatalf("review shortcuts from the sidebar: %d comments", len(w.comments))
+	}
+}
+
 func TestReviewListReturnsAfterEmptyView(t *testing.T) {
 	for _, name := range []string{"filter", "load error", "commit"} {
 		t.Run(name, func(t *testing.T) {
@@ -211,11 +226,11 @@ func TestReviewListReturnsAfterEmptyView(t *testing.T) {
 			w.focusList = true
 			tt.Frame()
 			tt.Frame()
-			if w.diffListEl != nil || !w.focusList {
-				t.Fatal("the hidden review kept an element or took focus")
+			if _, ok := tt.Find("Changes"); ok || !w.focusList {
+				t.Fatal("the hidden review was built or took focus")
 			}
-			if name == "filter" && w.treeEl != nil {
-				t.Fatal("the empty file tree kept an element")
+			if _, ok := tt.Find("Changed files"); name == "filter" && ok {
+				t.Fatal("the empty file tree was built")
 			}
 			tt.Key(0, ui.KeyJ)
 			tt.Key(0, ui.KeyEnter)
@@ -227,7 +242,7 @@ func TestReviewListReturnsAfterEmptyView(t *testing.T) {
 			w.buildTree()
 			w.rowsDirty = true
 			tt.Frame()
-			if w.diffListEl == nil || !w.diffListEl.FocusWithin() || w.focusList {
+			if !tt.Focused("Changes") || w.focusList {
 				t.Fatal("the returning review did not take focus")
 			}
 			tt.Key(0, ui.KeyJ)
@@ -316,7 +331,7 @@ func TestHistoryTakesFocus(t *testing.T) {
 	gitIn(t, dir, "add", ".")
 	gitIn(t, dir, "commit", "-q", "-m", "Second commit")
 	w, tt := newTestWindow(t, dir)
-	if w.tab != 1 || w.historyEl == nil || !w.historyEl.FocusWithin() {
+	if w.tab != 1 || !tt.Focused("History") {
 		t.Fatalf("tab %d: the history did not take the focus", w.tab)
 	}
 	// Down goes to the commit under the uncommitted changes.
@@ -334,7 +349,7 @@ func TestHistoryTakesFocus(t *testing.T) {
 		t.Fatalf("source %+v, %d rows", w.source, len(w.rows))
 	}
 	// The commit's rows came, but the history keeps the focus it took.
-	if w.historyEl == nil || !w.historyEl.FocusWithin() {
+	if !tt.Focused("History") {
 		t.Error("the history lost the focus")
 	}
 }
@@ -367,7 +382,7 @@ func TestTree(t *testing.T) {
 	if w.files[w.current].Path != "old.txt" || w.treeSel != "f:old.txt" {
 		t.Fatalf("current %s, chosen %q", w.files[w.current].Path, w.treeSel)
 	}
-	if w.treeEl == nil || !w.treeEl.FocusWithin() {
+	if !tt.Focused("Changed files") {
 		t.Error("the tree did not take the focus")
 	}
 	// Up goes to the file above.

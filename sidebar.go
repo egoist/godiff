@@ -464,7 +464,8 @@ func (w *window) fileTree(c *ui.Context) {
 		}
 		return ""
 	}
-	list := listWithFocus(c, &w.treeList, len(rows), func(i int, focused bool) {
+	ui.List(c, &w.treeList, len(rows), func(i int) {
+		focused := w.treeList.FocusWithin(c)
 		key := rows[i].key
 		n := w.treeItems[key]
 		if n == nil {
@@ -556,7 +557,6 @@ func (w *window) fileTree(c *ui.Context) {
 				Width(12).TextAlign(ui.Center).Shrink(0).Tooltip(f.Status.Label())
 		})
 	}).Grow(1).Padding(2, 8).Gap(1).Focusable().FocusRing(false).Label("Changed files")
-	w.treeEl = list
 
 	// The keys move the choice, open and close directories.
 	at := -1
@@ -571,28 +571,28 @@ func (w *window) fileTree(c *ui.Context) {
 			w.treeList.ScrollIntoView(i)
 		}
 	}
-	if list.Shortcut(0, ui.KeyDown) {
+	if w.treeList.Shortcut(c, 0, ui.KeyDown) {
 		move(at + 1)
 	}
-	if list.Shortcut(0, ui.KeyUp) {
+	if w.treeList.Shortcut(c, 0, ui.KeyUp) {
 		move(max(at-1, 0))
 	}
-	if list.Shortcut(0, ui.KeyHome) {
+	if w.treeList.Shortcut(c, 0, ui.KeyHome) {
 		move(0)
 	}
-	if list.Shortcut(0, ui.KeyEnd) {
+	if w.treeList.Shortcut(c, 0, ui.KeyEnd) {
 		move(len(rows) - 1)
 	}
 	if at >= 0 {
 		n := w.treeItems[rows[at].key]
-		if list.Shortcut(0, ui.KeyRight) && n != nil && n.dir {
+		if w.treeList.Shortcut(c, 0, ui.KeyRight) && n != nil && n.dir {
 			if w.closedDirs[rows[at].key] {
 				w.closedDirs[rows[at].key] = false
 			} else {
 				move(at + 1)
 			}
 		}
-		if list.Shortcut(0, ui.KeyLeft) {
+		if w.treeList.Shortcut(c, 0, ui.KeyLeft) {
 			if n != nil && n.dir && !w.closedDirs[rows[at].key] {
 				w.closedDirs[rows[at].key] = true
 			} else {
@@ -700,8 +700,8 @@ func (w *window) historyView(c *ui.Context) {
 		return entries[i].commit.Subject
 	}
 	now := time.Now()
-	list := listWithFocus(c, &w.historyList, len(entries), func(i int, focused bool) {
-		focused = focused || w.focusHistory
+	list := ui.List(c, &w.historyList, len(entries), func(i int) {
+		focused := w.historyList.FocusWithin(c) || w.focusHistory
 		e := entries[i]
 		row := ui.Row(c).Gap(8).Padding(5, 8).Radius(6).AlignItems(ui.Start).Role(ui.RoleButton)
 		if e.local {
@@ -748,9 +748,7 @@ func (w *window) historyView(c *ui.Context) {
 			})
 		})
 	}).Grow(1).Padding(2, 8).Gap(1).Focusable().FocusRing(false).Label("History")
-	w.historyEl = list
-	if w.focusHistory {
-		list.Focus()
+	if w.focusHistory && w.historyList.Focus(c) {
 		w.focusHistory = false
 	}
 	list.Children(func() {
@@ -758,10 +756,10 @@ func (w *window) historyView(c *ui.Context) {
 			ui.Text(c, "No matching commits").FontSize(12).TextColor(t.TextMuted).Padding(12)
 		}
 	})
-	if list.Shortcut(0, ui.KeyDown) {
+	if w.historyList.Shortcut(c, 0, ui.KeyDown) {
 		open(current + 1)
 	}
-	if list.Shortcut(0, ui.KeyUp) {
+	if w.historyList.Shortcut(c, 0, ui.KeyUp) {
 		open(max(current-1, 0))
 	}
 	// More commits load well before the end comes into view, so that

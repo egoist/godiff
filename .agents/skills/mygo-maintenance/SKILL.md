@@ -9,9 +9,9 @@ Check the app's pinned MyGo version and existing conventions before changing API
 
 ## UI lifetime and identity
 
-- `ui.Context` and `ui.Element` are temporary build/frame objects. Keep them out of background work and cross-frame state. Reset any fields sharing current-frame elements at the start of every build, including rebuild passes.
-- Build an element before querying its shortcuts or focus. Hidden, empty, loading, error, and alternate views must leave absent element references nil. Store semantic keys and pending focus requests between frames.
-- `ui.List` builds rows before returning its element. For focus styling inside row builders, use a current-frame parent scope rather than a previous list pointer.
+- `ui.Context` and `ui.Element` are temporary build-pass objects. Keep them out of app state and background work; a single frame can rebuild several times. Store semantic keys, widget state and pending focus requests instead.
+- For lists, tables and outlines, prefer `ListState.Focused(c)`, `FocusWithin(c)`, `Focus(c)` and `Shortcut(c, mods, key)` when available in the pinned version. Query inside row builders or after building the list; hidden lists report absence. Clear a pending focus request only when `Focus(c)` returns true.
+- With older versions, reset optional element references every build and query only after construction. Hidden, empty, loading, error and alternate views must leave absent references nil. `ui.List` builds rows before returning its element; use a current-pass parent scope for row focus styling, never a previous list pointer.
 - Preserve identity when siblings change: give containers stable, unique `.Key(...)` values immediately after creation, before building children. Widgets that process input during construction cannot be keyed directly; key their surrounding container. Use stable item keys in `ListState.Key`.
 - A non-nil pointer can refer to cleared or reused storage. Check lifetime ownership before adding nil guards or panic recovery; nil-analysis tools do not establish frame validity.
 

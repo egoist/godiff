@@ -46,7 +46,11 @@ func TestPlusOnUnchangedLines(t *testing.T) {
 		}
 		// The same line on the other side: the first, still empty, moves
 		// there.
-		right := box.X + float32(w.diffListEl.Bounds().W)/2
+		changes, ok := tt.Find("Changes")
+		if !ok {
+			t.Fatal("no changes list")
+		}
+		right := box.X + changes.W/2
 		clickPlus(tt, right, box.Y+box.H/2)
 		if len(w.comments) != 1 || w.comments[0].side != sideNew || countRows(w, rowComment) != 1 {
 			t.Errorf("other side: %d comments, %d shown", len(w.comments), countRows(w, rowComment))
@@ -90,8 +94,10 @@ func TestSwitchSourceOnFilesTab(t *testing.T) {
 	if w.source.kind != sourceCommit || tt.HasText("new.go") || !tt.HasText("First commit") {
 		t.Errorf("source %+v, texts %q", w.source, tt.Texts())
 	}
-	if w.diffListEl != nil || w.treeEl != nil {
-		t.Fatal("loading kept elements from the previous source")
+	for _, label := range []string{"Changes", "Changed files"} {
+		if _, ok := tt.Find(label); ok {
+			t.Fatalf("loading kept %s from the previous source", label)
+		}
 	}
 	w.hold = false
 	for len(w.held) > 0 {

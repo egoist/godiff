@@ -28,9 +28,6 @@ func (w *window) view(c *ui.Context) {
 	t := c.Theme()
 	pal := paletteFor(t)
 	w.now = c.Now()
-	// Elements belong to the frame that built them. In particular, an
-	// empty or loading view must not keep the previous frame's list.
-	w.diffListEl, w.treeEl, w.historyEl, w.pullsEl = nil, nil, nil, nil
 	if w.regroupPending {
 		w.regroupPending = false
 		w.regroup()
@@ -40,6 +37,7 @@ func (w *window) view(c *ui.Context) {
 	// of the sidebar, so the sidebar's color is drawn there instead.
 	c.Root().Background(w.sidebarBg(t))
 
+	reviewBuilt := false
 	ui.Row(c).Fill().AlignItems(ui.Stretch).Children(func() {
 		right := w.settings.SidebarPosition == "right"
 		if w.sidebarShown && !right {
@@ -48,14 +46,14 @@ func (w *window) view(c *ui.Context) {
 		}
 		ui.Column(c).Grow(1).MinWidth(0).Background(pal.appBg).Children(func() {
 			w.toolbar(c, pal)
-			w.mainArea(c, pal)
+			reviewBuilt = w.mainArea(c, pal)
 		})
 		if w.sidebarShown && right {
 			w.sidebarResizer(c, pal)
 			w.sidebar(c)
 		}
 	})
-	w.shortcuts(c)
+	w.shortcuts(c, reviewBuilt)
 	w.palette(c)
 	w.sourceDialog(c)
 	w.shortcutsHelp(c)
@@ -69,27 +67,14 @@ func (w *window) view(c *ui.Context) {
 			w.discarding = nil
 		}
 	}
-	if !w.focusedOnce && w.diffListEl != nil && len(w.rows) > 0 {
+	if !w.focusedOnce && reviewBuilt {
 		// The review takes the keys as the window opens.
 		w.focusedOnce = true
 		w.focusList = true
 	}
-	if w.focusList && w.diffListEl != nil {
-		w.diffListEl.Focus()
+	if w.focusList && w.list.Focus(c) {
 		w.focusList = false
 	}
-}
-
-// listWithFocus gives row builders a current-frame focus scope. List
-// builds rows before returning its Element, so they cannot use a saved
-// list element from an earlier frame to check focus.
-func listWithFocus(c *ui.Context, state *ui.ListState, n int, row func(int, bool)) *ui.Element {
-	scope := ui.Column(c).Grow(1).MinHeight(0)
-	var list *ui.Element
-	scope.Children(func() {
-		list = ui.List(c, state, n, func(i int) { row(i, scope.FocusWithin()) }).Grow(1)
-	})
-	return list
 }
 
 // debugFrames logs the views that take long to build.
@@ -214,12 +199,13 @@ func (w *window) layoutControl(c *ui.Context, pal *palette) {
 	}
 }
 
-// mainArea shows the review, the commit view, or why there is nothing.
-func (w *window) mainArea(c *ui.Context, pal *palette) {
+// mainArea shows the review, the commit view, or why there is nothing,
+// and reports whether it built the review list in this pass.
+func (w *window) mainArea(c *ui.Context, pal *palette) bool {
 	t := c.Theme()
 	if w.commitOpen && w.source.kind == sourceWorkingTree {
 		w.commitView(c)
-		return
+		return false
 	}
 	if w.changed {
 		ui.Row(c).Justify(ui.Center).Padding(8, 12, 0).Children(func() {
@@ -320,10 +306,12 @@ func (w *window) mainArea(c *ui.Context, pal *palette) {
 				detail = "Whitespace-only changes hidden"
 			}
 			emptyPanel(c, pal, title, detail, nil)
-			return
+			return false
 		}
 		w.diffList(c)
+		return true
 	}
+	return false
 }
 
 // commitMessage shows the message of the commit reviewed.
@@ -380,7 +368,7 @@ func thinking(c *ui.Context, status string) {
 }
 
 // shortcuts handles the window's keys that the menus do not.
-func (w *window) shortcuts(c *ui.Context) {
+func (w *window) shortcuts(c *ui.Context, reviewBuilt bool) {
 	if c.Shortcut(ui.Cmd|ui.Shift, ui.KeyP) {
 		w.paletteOpen = !w.paletteOpen
 		w.paletteRow = 0
@@ -389,7 +377,7 @@ func (w *window) shortcuts(c *ui.Context) {
 	// had the focus in the last frame.
 	typing := w.typing
 	w.typing = false
-	if w.commitOpen || w.paletteOpen || w.dialogOpen || w.help || typing || w.diffListEl == nil || (w.pr != nil && w.pr.submitOpen) {
+	if w.commitOpen || w.paletteOpen || w.dialogOpen || w.help || typing || !reviewBuilt || (w.pr != nil && w.pr.submitOpen) {
 		return
 	}
 	if c.Shortcut(0, ui.KeyJ) || c.Shortcut(ui.Ctrl, ui.KeyDown) {
@@ -398,7 +386,7 @@ func (w *window) shortcuts(c *ui.Context) {
 	if c.Shortcut(0, ui.KeyK) || c.Shortcut(ui.Ctrl, ui.KeyUp) {
 		w.nextHunk(-1)
 	}
-	if w.diffListEl.Shortcut(0, ui.KeyEnter) || (w.selHunk >= 0 && c.Shortcut(0, ui.KeyEnter)) {
+	if w.list.Shortcut(c, 0, ui.KeyEnter) || (w.selHunk >= 0 && c.Shortcut(0, ui.KeyEnter)) {
 		w.commentOnSelection()
 	}
 	if c.Shortcut(0, ui.KeyN) {

@@ -80,7 +80,8 @@ func (w *window) pullsView(c *ui.Context) {
 	}
 	w.pullsList.Key = func(i int) any { return list[i].Number }
 	w.pullsList.Label = func(i int) string { return list[i].Title }
-	l := listWithFocus(c, &w.pullsList, len(list), func(i int, focused bool) {
+	ui.List(c, &w.pullsList, len(list), func(i int) {
+		focused := w.pullsList.FocusWithin(c)
 		p := list[i]
 		row := ui.Row(c).Gap(8).Padding(6, 8).Radius(6).AlignItems(ui.Start).Role(ui.RoleButton).Label(p.Title)
 		muted, ref := t.TextMuted, pal.ref
@@ -128,11 +129,10 @@ func (w *window) pullsView(c *ui.Context) {
 			})
 		})
 	}).Grow(1).Padding(2, 8).Gap(1).Focusable().FocusRing(false).Label("Pull requests")
-	w.pullsEl = l
-	if l.Shortcut(0, ui.KeyDown) {
+	if w.pullsList.Shortcut(c, 0, ui.KeyDown) {
 		open(current + 1)
 	}
-	if l.Shortcut(0, ui.KeyUp) {
+	if w.pullsList.Shortcut(c, 0, ui.KeyUp) {
 		open(max(current-1, 0))
 	}
 }
