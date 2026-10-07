@@ -32,9 +32,10 @@ type fileState struct {
 	// metric is computed once the contents are loaded.
 	metric      fileMetrics
 	metricsDone bool
-	// spans keeps the styled code of the lines shown, which does not change
-	// from frame to frame.
-	spans map[spanKey][]ui.Span
+	// Styled code requested in this view and the previous one. Rows are
+	// virtualized, so keep only recently displayed lines, not every line
+	// the user has scrolled past.
+	spans, previousSpans map[spanKey][]ui.Span
 	// group is the index of the file's group, -1 for none.
 	group int
 	// kind is the icon of the file's kind, once drawn.
