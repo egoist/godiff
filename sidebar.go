@@ -450,7 +450,6 @@ func (w *window) fileTree(c *ui.Context) {
 	}
 	rows := w.visibleTree()
 	w.treeRows = rows
-	focused := w.treeEl != nil && w.treeEl.FocusWithin()
 	choose := func(key string) {
 		w.treeSel = key
 		if n := w.treeItems[key]; n != nil && !n.dir {
@@ -465,7 +464,7 @@ func (w *window) fileTree(c *ui.Context) {
 		}
 		return ""
 	}
-	list := ui.List(c, &w.treeList, len(rows), func(i int) {
+	list := listWithFocus(c, &w.treeList, len(rows), func(i int, focused bool) {
 		key := rows[i].key
 		n := w.treeItems[key]
 		if n == nil {
@@ -700,9 +699,9 @@ func (w *window) historyView(c *ui.Context) {
 		}
 		return entries[i].commit.Subject
 	}
-	focused := w.focusHistory || w.historyEl != nil && w.historyEl.FocusWithin()
 	now := time.Now()
-	list := ui.List(c, &w.historyList, len(entries), func(i int) {
+	list := listWithFocus(c, &w.historyList, len(entries), func(i int, focused bool) {
+		focused = focused || w.focusHistory
 		e := entries[i]
 		row := ui.Row(c).Gap(8).Padding(5, 8).Radius(6).AlignItems(ui.Start).Role(ui.RoleButton)
 		if e.local {

@@ -84,10 +84,14 @@ func TestSwitchSourceOnFilesTab(t *testing.T) {
 	w.hold = true
 	w.setSource(source{kind: sourceCommit, ref: hash})
 	tt.Frame()
+	tt.Frame()
 	// The commit shows at once, its message from the history, before its
 	// changes load.
 	if w.source.kind != sourceCommit || tt.HasText("new.go") || !tt.HasText("First commit") {
 		t.Errorf("source %+v, texts %q", w.source, tt.Texts())
+	}
+	if w.diffListEl != nil || w.treeEl != nil {
+		t.Fatal("loading kept elements from the previous source")
 	}
 	w.hold = false
 	for len(w.held) > 0 {

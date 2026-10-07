@@ -28,6 +28,9 @@ func (w *window) view(c *ui.Context) {
 	t := c.Theme()
 	pal := paletteFor(t)
 	w.now = c.Now()
+	// Elements belong to the frame that built them. In particular, an
+	// empty or loading view must not keep the previous frame's list.
+	w.diffListEl, w.treeEl, w.historyEl, w.pullsEl = nil, nil, nil, nil
 	if w.regroupPending {
 		w.regroupPending = false
 		w.regroup()
@@ -36,7 +39,6 @@ func (w *window) view(c *ui.Context) {
 	// drawn. Elsewhere it would show black, as under the translucent edge
 	// of the sidebar, so the sidebar's color is drawn there instead.
 	c.Root().Background(w.sidebarBg(t))
-	w.shortcuts(c)
 
 	ui.Row(c).Fill().AlignItems(ui.Stretch).Children(func() {
 		right := w.settings.SidebarPosition == "right"
@@ -53,6 +55,7 @@ func (w *window) view(c *ui.Context) {
 			w.sidebar(c)
 		}
 	})
+	w.shortcuts(c)
 	w.palette(c)
 	w.sourceDialog(c)
 	w.shortcutsHelp(c)
@@ -75,6 +78,18 @@ func (w *window) view(c *ui.Context) {
 		w.diffListEl.Focus()
 		w.focusList = false
 	}
+}
+
+// listWithFocus gives row builders a current-frame focus scope. List
+// builds rows before returning its Element, so they cannot use a saved
+// list element from an earlier frame to check focus.
+func listWithFocus(c *ui.Context, state *ui.ListState, n int, row func(int, bool)) *ui.Element {
+	scope := ui.Column(c).Grow(1).MinHeight(0)
+	var list *ui.Element
+	scope.Children(func() {
+		list = ui.List(c, state, n, func(i int) { row(i, scope.FocusWithin()) }).Grow(1)
+	})
+	return list
 }
 
 // debugFrames logs the views that take long to build.

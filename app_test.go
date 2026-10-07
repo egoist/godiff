@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"errors"
 	"image"
 	"image/color"
 	"image/png"
@@ -189,6 +190,52 @@ func TestComments(t *testing.T) {
 	md := w.commentsMarkdown()
 	if !strings.HasPrefix(md, "# Address these Review Comments\n\n1. **docs/long.txt** (New line ") || !strings.Contains(md, "   Rename this.") || !strings.Contains(md, "   ```diff\n   @@ ") {
 		t.Errorf("markdown:\n%s", md)
+	}
+}
+
+func TestReviewListReturnsAfterEmptyView(t *testing.T) {
+	for _, name := range []string{"filter", "load error", "commit"} {
+		t.Run(name, func(t *testing.T) {
+			w, tt := newTestWindow(t, testRepo(t))
+			switch name {
+			case "filter":
+				w.filter = "no-such-file"
+				w.buildTree()
+				w.rowsDirty = true
+			case "load error":
+				w.loadErr = errors.New("unable to load changes")
+			case "commit":
+				w.commitOpen = true
+			}
+			// A request to focus the review waits until its list returns.
+			w.focusList = true
+			tt.Frame()
+			tt.Frame()
+			if w.diffListEl != nil || !w.focusList {
+				t.Fatal("the hidden review kept an element or took focus")
+			}
+			if name == "filter" && w.treeEl != nil {
+				t.Fatal("the empty file tree kept an element")
+			}
+			tt.Key(0, ui.KeyJ)
+			tt.Key(0, ui.KeyEnter)
+			if w.selHunk >= 0 || len(w.comments) != 0 {
+				t.Fatal("review shortcuts ran while its list was hidden")
+			}
+
+			w.filter, w.loadErr, w.commitOpen = "", nil, false
+			w.buildTree()
+			w.rowsDirty = true
+			tt.Frame()
+			if w.diffListEl == nil || !w.diffListEl.FocusWithin() || w.focusList {
+				t.Fatal("the returning review did not take focus")
+			}
+			tt.Key(0, ui.KeyJ)
+			tt.Key(0, ui.KeyEnter)
+			if len(w.comments) != 1 {
+				t.Fatalf("review shortcuts did not return: %d comments", len(w.comments))
+			}
+		})
 	}
 }
 

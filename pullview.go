@@ -80,8 +80,7 @@ func (w *window) pullsView(c *ui.Context) {
 	}
 	w.pullsList.Key = func(i int) any { return list[i].Number }
 	w.pullsList.Label = func(i int) string { return list[i].Title }
-	focused := w.pullsEl != nil && w.pullsEl.FocusWithin()
-	l := ui.List(c, &w.pullsList, len(list), func(i int) {
+	l := listWithFocus(c, &w.pullsList, len(list), func(i int, focused bool) {
 		p := list[i]
 		row := ui.Row(c).Gap(8).Padding(6, 8).Radius(6).AlignItems(ui.Start).Role(ui.RoleButton).Label(p.Title)
 		muted, ref := t.TextMuted, pal.ref
