@@ -79,7 +79,7 @@ func (w *window) diffList(c *ui.Context) {
 		w.updateMatches()
 		w.buildRows()
 	}
-	list := ui.List(c, &w.list, len(w.rows), func(i int) { w.diffRow(c, pal, i) }).
+	list := listWithFocus(c, &w.list, len(w.rows), func(i int, focused bool) { w.diffRow(c, pal, i, focused) }).
 		Grow(1).Padding(0, 12, 24).Background(pal.appBg).Label("Changes")
 	w.diffListEl = list
 
@@ -112,7 +112,7 @@ func (w *window) revealFile(i int) {
 	w.revealedAt = time.Now()
 }
 
-func (w *window) diffRow(c *ui.Context, pal *palette, i int) {
+func (w *window) diffRow(c *ui.Context, pal *palette, i int, focused bool) {
 	r := &w.rows[i]
 	switch r.kind {
 	case rowCommit:
@@ -135,7 +135,7 @@ func (w *window) diffRow(c *ui.Context, pal *palette, i int) {
 	case rowAINote:
 		w.noteRow(c, pal, r.note)
 	case rowHeader:
-		w.fileHeader(c, pal, int(r.file), f)
+		w.fileHeader(c, pal, int(r.file), f, focused)
 	case rowNote:
 		w.card(c, pal).Padding(10, 16).Background(pal.gapBg).Children(func() {
 			ui.Text(c, w.fileNote(f)).FontSize(12).TextColor(pal.gapText)
@@ -169,7 +169,7 @@ func (w *window) forceOpen(i int) bool {
 	return w.searching() && w.fileMatches[i]
 }
 
-func (w *window) fileHeader(c *ui.Context, pal *palette, idx int, f *fileState) {
+func (w *window) fileHeader(c *ui.Context, pal *palette, idx int, f *fileState, focused bool) {
 	t := c.Theme()
 	collapsed := f.collapsed && !w.forceOpen(idx)
 	viewed := w.isViewed(f)
@@ -185,7 +185,7 @@ func (w *window) fileHeader(c *ui.Context, pal *palette, idx int, f *fileState) 
 	} else {
 		h.Radius(cardRadius, cardRadius, 0, 0)
 	}
-	if idx == w.current && w.diffListEl != nil && w.diffListEl.FocusWithin() {
+	if idx == w.current && focused {
 		h.Border(1, t.Accent.Alpha(0.6))
 	}
 	h.ContextMenu(func(m *ui.Menu) {
