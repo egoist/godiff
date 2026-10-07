@@ -79,9 +79,8 @@ func (w *window) diffList(c *ui.Context) {
 		w.updateMatches()
 		w.buildRows()
 	}
-	list := listWithFocus(c, &w.list, len(w.rows), func(i int, focused bool) { w.diffRow(c, pal, i, focused) }).
+	ui.List(c, &w.list, len(w.rows), func(i int) { w.diffRow(c, pal, i, w.list.FocusWithin(c)) }).
 		Grow(1).Padding(0, 12, 24).Background(pal.appBg).Label("Changes")
-	w.diffListEl = list
 
 	// The file at the top follows the scrolling, and the tree with it.
 	first, _ := w.list.Visible()

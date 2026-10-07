@@ -146,6 +146,42 @@ func withSettings(t *testing.T, fn func(s *Settings)) {
 	t.Cleanup(func() { cfg.Update(func(s *Settings) { *s = old }) })
 }
 
+func TestPullListKeyboard(t *testing.T) {
+	w, tt := newTestWindow(t, testRepo(t))
+	w.gh = ghRemote{repo: github.Repo{Owner: "acme", Name: "app"}, remote: "origin"}
+	w.pulls = []github.Summary{{Number: 1, Title: "First pull"}, {Number: 2, Title: "Second pull"}}
+	w.pullsLoaded, w.hold, w.tab = true, true, 2
+	tt.Frame()
+	if err := tt.Click("First pull"); err != nil {
+		t.Fatal(err)
+	}
+	if !tt.Focused("Pull requests") {
+		t.Fatal("the pull request list did not take focus")
+	}
+	check := func(number int) {
+		t.Helper()
+		if want := pullSource(w.gh.repo, number); w.source != want {
+			t.Fatalf("source %+v, want %+v", w.source, want)
+		}
+	}
+	tt.Key(0, ui.KeyDown)
+	check(2)
+	tt.Key(0, ui.KeyUp)
+	check(1)
+	w.pullsFilter = "no-such-pull"
+	tt.Frame()
+	tt.Frame()
+	tt.Key(0, ui.KeyDown)
+	check(1)
+	w.pullsFilter = ""
+	tt.Frame()
+	if err := tt.Click("First pull"); err != nil {
+		t.Fatal(err)
+	}
+	tt.Key(0, ui.KeyDown)
+	check(2)
+}
+
 func TestPullRequest(t *testing.T) {
 	clone, base, head := pullRepo(t)
 	f := &fakeGitHub{base: base, head: head, comments: `[
