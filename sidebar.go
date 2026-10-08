@@ -478,6 +478,9 @@ func (w *window) fileTree(c *ui.Context) {
 		case row.Hovered():
 			row.Background(ui.RGBA(127, 127, 127, 0.08))
 		}
+		if row.Pressed() && (!selected || w.commitOpen) {
+			choose(key)
+		}
 		if row.Clicked() {
 			if n.dir {
 				w.closedDirs[key] = !w.closedDirs[key]
@@ -714,7 +717,7 @@ func (w *window) historyView(c *ui.Context) {
 		case row.Hovered():
 			row.Background(ui.RGBA(127, 127, 127, 0.08))
 		}
-		if row.Clicked() {
+		if (row.Pressed() || row.Clicked()) && i != current {
 			if debugFrames {
 				log.Printf("history row %d clicked", i)
 			}

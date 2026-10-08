@@ -95,7 +95,7 @@ func (w *window) pullsView(c *ui.Context) {
 		case row.Hovered():
 			row.Background(ui.RGBA(127, 127, 127, 0.08))
 		}
-		if row.Clicked() {
+		if (row.Pressed() || row.Clicked()) && i != current {
 			open(i)
 		}
 		row.Tooltip(fmt.Sprintf("#%d %s\n%s wants to merge %s", p.Number, p.Title, p.Author.Login, p.HeadRef))

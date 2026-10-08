@@ -51,6 +51,9 @@ dark mode, menus and vibrancy.
   **command bar** (<kbd>⌘K</kbd>).
 - Image previews of changed pictures, a file tree with change counts and
   status letters, and a banner when the work tree changes.
+- Sidebar navigation selects files, directories, commits and pull requests
+  on pointer press, showing the new selection as the sidebar takes focus.
+  Directory disclosure and button actions activate on release.
 - **File icons** of each kind of file, in its color, as codiff's file tree
   draws them: the icons of [@pierre/trees](https://www.npmjs.com/package/@pierre/trees).
 
