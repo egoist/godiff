@@ -158,7 +158,7 @@ func (w *window) diffRow(c *ui.Context, pal *palette, i int, focused bool) {
 }
 
 // card is a row inside a file's card, between its sides.
-func (w *window) card(c *ui.Context, pal *palette) *ui.Element {
+func (w *window) card(c *ui.Context, pal *palette) ui.Element {
 	return ui.Row(c).Background(pal.codeBg).BorderWidth(0, 1, 0, 1).BorderColor(pal.cardBorder)
 }
 
@@ -175,7 +175,7 @@ func (w *window) fileHeader(c *ui.Context, pal *palette, idx int, f *fileState, 
 	// The band above the header spaces the cards, and hides the lines
 	// scrolling under it while it is pinned.
 	band := ui.Column(c).Padding(12, 0, 0, 0).Background(pal.appBg)
-	var h *ui.Element
+	var h ui.Element
 	band.Children(func() {
 		h = ui.Row(c).Height(46).Padding(0, 8, 0, 6).Gap(8).Background(pal.headerBg).Border(1, pal.cardBorder)
 	})
@@ -287,9 +287,7 @@ func (w *window) viewedButton(c *ui.Context, pal *palette, f *fileState, viewed 
 	on := viewed
 	b := ui.CheckboxBase(c, &on).Gap(7).Height(30).Padding(0, 11).Radius(14).Shrink(0).
 		Border(1, ui.RGBA(127, 127, 127, 0.22)).Label("Viewed")
-	if b.Changed() {
-		w.setViewed(f, on)
-	}
+	b.OnClick(func() { w.setViewed(f, on) })
 	if b.Hovered() {
 		b.Background(pal.hover)
 	}
@@ -493,16 +491,19 @@ func (w *window) lineRow(c *ui.Context, pal *palette, f *fileState, r *row) {
 	e := w.card(c, pal).AlignItems(ui.Stretch).MinHeight(lh)
 	hs := w.hscroll[f.Path]
 	if !w.settings.WordWrap {
+		handle := ui.Local(e, "input-handle", func() ui.Handle { return ui.Handle{} })
+		e.Bind(handle)
+		charWidth := w.charWidth(c)
 		e.HandleInput(func(ev ui.InputEvent) bool {
 			if ev.Kind != ui.InputScroll || math.Abs(float64(ev.DX)) <= math.Abs(float64(ev.DY)) {
 				return false
 			}
-			b := e.Bounds()
+			b := handle.Bounds(c)
 			code := b.W - 2*gutter - 40
 			if w.splitFile(f) {
 				code = b.W/2 - gutter - 30
 			}
-			limit := max(float32(f.metrics().maxCols)*w.charWidth(c)-code, 0)
+			limit := max(float32(f.metrics().maxCols)*charWidth-code, 0)
 			w.hscroll[f.Path] = min(max(w.hscroll[f.Path]+ev.DX, 0), limit)
 			w.invalidate()
 			return true

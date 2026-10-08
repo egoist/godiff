@@ -258,7 +258,7 @@ func (w *window) changedSince(st *analysisState) int {
 
 // summaryCard shows the agent's review of the changes: its summary, or
 // what it does while at work.
-func (w *window) summaryCard(c *ui.Context, pal *palette) *ui.Element {
+func (w *window) summaryCard(c *ui.Context, pal *palette) ui.Element {
 	t := c.Theme()
 	st := w.analyses[w.source]
 	return ui.Column(c).Padding(12, 16).Gap(8).Radius(cardRadius).Background(pal.headerBg).Border(1, t.Accent.Alpha(0.3)).Children(func() {
@@ -692,6 +692,7 @@ func (w *window) groupControl(c *ui.Context, pal *palette) {
 			if i == current {
 				s.Background(pal.headerBg).Shadow(0, 1, 2, 0, ui.RGBA(0, 0, 0, 0.12)).TextColor(t.Text)
 			}
+			s.OnClick(func() { w.chooseGrouping(modes[i]) })
 			s.Children(func() {
 				if i == 2 && running {
 					// A review under way. A spinner is painted again, as
@@ -704,9 +705,7 @@ func (w *window) groupControl(c *ui.Context, pal *palette) {
 			})
 		}
 	})
-	if choice != current {
-		w.chooseGrouping(modes[choice])
-	}
+
 }
 
 // chooseGrouping groups the files as the user chose. Grouping by an AI

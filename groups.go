@@ -296,7 +296,7 @@ func (w *window) scopeBar(c *ui.Context, pal *palette) {
 				if g.summary != "" {
 					tip += ": " + g.summary
 				}
-				b := ui.ButtonBase(c).Key(g.key).Height(26).Padding(0, 10, 0, 8).Gap(6).Radius(13).Label(g.label).Tooltip(tip).
+				b := ui.ButtonBase(c.Key(g.key)).Height(26).Padding(0, 10, 0, 8).Gap(6).Radius(13).Label(g.label).Tooltip(tip).
 					Border(1, ui.RGBA(127, 127, 127, 0.18)).Shrink(0)
 				switch {
 				case gi == active:

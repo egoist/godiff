@@ -184,7 +184,7 @@ func (w *window) palette(c *ui.Context) {
 		w.paletteQuery = ""
 		cmds[i].run()
 	}
-	ui.DialogBase(c, &w.paletteOpen, func(backdrop, panel *ui.Element) {
+	ui.DialogBase(c, &w.paletteOpen, func(backdrop, panel ui.Element) {
 		backdrop.Background(ui.RGBA(0, 0, 0, 0.12)).Justify(ui.Start).Padding(120, 0, 0, 0)
 		panel.Width(560).MaxHeight(440).Radius(16).Background(pal.headerBg).Border(1, pal.cardBorder).
 			Shadow(0, 20, 60, 0, ui.RGBA(0, 0, 0, 0.28)).Clip().Label("Command bar")
@@ -252,7 +252,7 @@ func (w *window) palette(c *ui.Context) {
 
 // paletteMoved reports whether the pointer moved over an item, so that a
 // list scrolled under a still pointer keeps the row the keys chose.
-func (w *window) paletteMoved(e *ui.Element) bool {
+func (w *window) paletteMoved(e ui.Element) bool {
 	x, y, over := e.PointerPosition()
 	if !over {
 		return false

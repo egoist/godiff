@@ -319,7 +319,6 @@ const titleBarHeight = 52
 func (w *window) tabControl(c *ui.Context) bool {
 	t := c.Theme()
 	pal := paletteFor(t)
-	tab := w.tab
 	type item struct {
 		icon *ui.SVG
 		name string
@@ -328,21 +327,17 @@ func (w *window) tabControl(c *ui.Context) bool {
 	if w.gh.ok() {
 		items = append(items, item{iconPull, "Pull Requests (⌘3)"})
 	}
-	seg := ui.SegmentedBase(c, &tab, len(items))
+	seg := ui.SegmentedBase(c, &w.tab, len(items))
 	seg.Track.Padding(2).Gap(2).Radius(8).Background(ui.RGBA(127, 127, 127, 0.12)).Label("Sidebar").Children(func() {
 		for i, it := range items {
 			s := seg.Segment(i).Size(30, 24).Radius(6).Center().Label(it.name).Tooltip(it.name).TextColor(t.TextMuted)
-			if i == tab {
+			if i == w.tab {
 				s.Background(pal.headerBg).Shadow(0, 1, 2, 0, ui.RGBA(0, 0, 0, 0.12)).TextColor(t.Text)
 			}
 			s.Children(func() { ui.Icon(c, it.icon).FontSize(15) })
 		}
 	})
-	if tab != w.tab {
-		w.tab = tab
-		return true
-	}
-	return false
+	return seg.Track.Changed()
 }
 
 // sidebarToggle shows and hides the sidebar.
@@ -398,7 +393,7 @@ func searchInput(c *ui.Context, query *string, placeholder string, focus *bool, 
 }
 
 // iconButton is a button showing an icon alone, as in a toolbar.
-func iconButton(c *ui.Context, svg *ui.SVG, tip string) *ui.Element {
+func iconButton(c *ui.Context, svg *ui.SVG, tip string) ui.Element {
 	t := c.Theme()
 	b := ui.ButtonBase(c).Size(28, 28).Radius(7).Center().Label(tip).Tooltip(tip).TextColor(t.TextMuted)
 	if b.Pressed() {

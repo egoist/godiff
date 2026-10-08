@@ -147,7 +147,7 @@ func (w *window) commitView(c *ui.Context) {
 					})
 					for _, f := range files {
 						on := w.commitPaths[f.Path]
-						row := ui.ButtonBase(c).Key(f.Path).Gap(10).Padding(5, 8, 5, 26).Radius(8).Label(f.Path)
+						row := ui.ButtonBase(c.Key(f.Path)).Gap(10).Padding(5, 8, 5, 26).Radius(8).Label(f.Path)
 						if row.Hovered() {
 							row.Background(pal.hover)
 						}

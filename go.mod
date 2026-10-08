@@ -6,7 +6,7 @@ tool github.com/egoist/mygo/cmd/mygo
 
 require (
 	github.com/alecthomas/chroma/v2 v2.27.0
-	github.com/egoist/mygo v0.2.18-0.20261007205042-505a59060d45
+	github.com/egoist/mygo v0.3.0
 )
 
 require (

@@ -154,7 +154,7 @@ func pickColor(on bool, a, b ui.Color) ui.Color {
 
 // stateBadge is the pull request's state as GitHub shows it: Open,
 // Draft, Merged or Closed.
-func stateBadge(c *ui.Context, pal *palette, m *github.PullRequest) *ui.Element {
+func stateBadge(c *ui.Context, pal *palette, m *github.PullRequest) ui.Element {
 	t := c.Theme()
 	status := m.Status()
 	icon, color := iconPull, pal.addBar
@@ -186,7 +186,7 @@ func plainBody(s string) string {
 
 // pullHeader shows the pull request reviewed: its state, title, branches,
 // description and reviews.
-func (w *window) pullHeader(c *ui.Context, pal *palette) *ui.Element {
+func (w *window) pullHeader(c *ui.Context, pal *palette) ui.Element {
 	t := c.Theme()
 	p := w.pr
 	m := p.meta
@@ -441,7 +441,7 @@ func (w *window) threadComment(c *ui.Context, pal *palette, th *github.Thread, c
 	t := c.Theme()
 	p := w.pr
 	own := p.viewer != "" && cm.Author.Login == p.viewer && p.canWrite()
-	ui.Row(c).Key(cm.ID).Gap(10).Padding(10, 12).AlignItems(ui.Start).Children(func() {
+	ui.Row(c.Key(cm.ID)).Gap(10).Padding(10, 12).AlignItems(ui.Start).Children(func() {
 		avatar(c, cm.Author, 24)
 		ui.Column(c).Grow(1).MinWidth(0).Gap(4).Children(func() {
 			ui.Row(c).Gap(6).Children(func() {
@@ -748,7 +748,7 @@ var avatars struct {
 var fetchAvatars bool
 
 // avatar shows a user's picture, their initials until it comes.
-func avatar(c *ui.Context, u github.User, size float32) *ui.Element {
+func avatar(c *ui.Context, u github.User, size float32) ui.Element {
 	img := avatarImage(u)
 	if img == nil {
 		return ui.Avatar(c, u.Login, nil).Size(size, size).Tooltip(u.Login)

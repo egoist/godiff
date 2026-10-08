@@ -43,7 +43,7 @@ type fileState struct {
 
 // fileIcon draws the icon of a file's kind in its color, as codiff's
 // file tree does; a folder for an untracked directory.
-func fileIcon(c *ui.Context, f *fileState, size float32) *ui.Element {
+func fileIcon(c *ui.Context, f *fileState, size float32) ui.Element {
 	t := c.Theme()
 	if f.Directory {
 		return ui.Icon(c, iconFolder).FontSize(size).TextColor(t.TextMuted).Shrink(0)

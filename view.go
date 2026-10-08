@@ -164,7 +164,7 @@ func (w *window) toolbar(c *ui.Context, pal *palette) {
 }
 
 // chip is a label in a pill, as the branch.
-func chip(c *ui.Context, pal *palette, svg *ui.SVG, label string, color ui.Color) *ui.Element {
+func chip(c *ui.Context, pal *palette, svg *ui.SVG, label string, color ui.Color) ui.Element {
 	return ui.Row(c).Gap(5).Padding(3, 8).Radius(12).Background(ui.RGBA(127, 127, 127, 0.08)).
 		Border(1, ui.RGBA(127, 127, 127, 0.12)).TextColor(color).Shrink(1).MinWidth(0).MaxWidth(240).Children(func() {
 		ui.Icon(c, svg).FontSize(12)
@@ -189,14 +189,18 @@ func (w *window) layoutControl(c *ui.Context, pal *palette) {
 			if i == choice {
 				s.Background(pal.headerBg).Shadow(0, 1, 2, 0, ui.RGBA(0, 0, 0, 0.12)).TextColor(t.Text)
 			}
+			s.OnClick(func() {
+				split := i == 0
+				if split != w.split() {
+					toggleLayout()
+					w.settings.DiffStyle = map[bool]string{true: "split", false: "unified"}[split]
+					w.rowsDirty = true
+				}
+			})
 			s.Children(func() { ui.Icon(c, it.icon).FontSize(15) })
 		}
 	})
-	if (choice == 0) != w.split() {
-		toggleLayout()
-		w.settings.DiffStyle = map[bool]string{true: "split", false: "unified"}[choice == 0]
-		w.rowsDirty = true
-	}
+
 }
 
 // mainArea shows the review, the commit view, or why there is nothing,
@@ -315,7 +319,7 @@ func (w *window) mainArea(c *ui.Context, pal *palette) bool {
 }
 
 // commitMessage shows the message of the commit reviewed.
-func (w *window) commitMessage(c *ui.Context, pal *palette) *ui.Element {
+func (w *window) commitMessage(c *ui.Context, pal *palette) ui.Element {
 	t := c.Theme()
 	cm := w.commit
 	return ui.Column(c).Padding(12, 16).Gap(6).Radius(cardRadius).Background(pal.headerBg).Border(1, pal.cardBorder).Children(func() {
