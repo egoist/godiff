@@ -120,6 +120,11 @@ type reviewJSON struct {
 type resolution struct {
 	nodeID   string
 	resolved bool
+	// The location, which REST leaves out for pending comments; side is
+	// "" when GraphQL did not give it.
+	line, originalLine, startLine int
+	side                          Side
+	outdated                      bool
 }
 
 // Reviews returns the review threads, the reviews and the viewer's pending
@@ -184,6 +189,12 @@ func normalize(comments []reviewCommentJSON, reviews []reviewJSON, pending []rev
 			}
 			if r, ok := res[root]; ok {
 				t.NodeID, t.Resolved = r.nodeID, r.resolved
+				// REST gives pending comments no line; submitted ones keep
+				// REST's, where no line means outdated.
+				if isPending && r.side != "" {
+					t.Line, t.StartLine, t.OriginalLine = r.line, r.startLine, r.originalLine
+					t.Side, t.Outdated = r.side, r.outdated
+				}
 			}
 			threads[root] = t
 			out.Threads = append(out.Threads, t)
@@ -230,7 +241,10 @@ query ReviewThreads($owner: String!, $repo: String!, $number: Int!, $cursor: Str
     pullRequest(number: $number) {
       reviewThreads(first: 100, after: $cursor) {
         pageInfo { hasNextPage endCursor }
-        nodes { id isResolved comments(first: 1) { nodes { fullDatabaseId } } }
+        nodes {
+          id isResolved isOutdated line originalLine startLine diffSide
+          comments(first: 1) { nodes { fullDatabaseId } }
+        }
       }
     }
   }
@@ -251,9 +265,14 @@ func (c *Client) resolutions(ctx context.Context, repo Repo, number int) (map[in
 							EndCursor   string `json:"endCursor"`
 						} `json:"pageInfo"`
 						Nodes []struct {
-							ID         string `json:"id"`
-							IsResolved bool   `json:"isResolved"`
-							Comments   struct {
+							ID           string `json:"id"`
+							IsResolved   bool   `json:"isResolved"`
+							IsOutdated   bool   `json:"isOutdated"`
+							Line         *int   `json:"line"`
+							OriginalLine *int   `json:"originalLine"`
+							StartLine    *int   `json:"startLine"`
+							DiffSide     Side   `json:"diffSide"`
+							Comments     struct {
 								Nodes []struct {
 									FullDatabaseID string `json:"fullDatabaseId"`
 								} `json:"nodes"`
@@ -278,7 +297,11 @@ func (c *Client) resolutions(ctx context.Context, repo Repo, number int) (map[in
 			var id int64
 			fmt.Sscan(n.Comments.Nodes[0].FullDatabaseID, &id)
 			if id != 0 {
-				out[id] = resolution{nodeID: n.ID, resolved: n.IsResolved}
+				out[id] = resolution{
+					nodeID: n.ID, resolved: n.IsResolved,
+					line: deref(n.Line), originalLine: deref(n.OriginalLine), startLine: deref(n.StartLine),
+					side: n.DiffSide, outdated: n.IsOutdated,
+				}
 			}
 		}
 		if !rt.PageInfo.HasNextPage {
@@ -286,6 +309,14 @@ func (c *Client) resolutions(ctx context.Context, repo Repo, number int) (map[in
 		}
 		cursor = rt.PageInfo.EndCursor
 	}
+}
+
+// deref is *p, or 0 when p is nil.
+func deref(p *int) int {
+	if p == nil {
+		return 0
+	}
+	return *p
 }
 
 // NewComment is a review comment to post on a line, or on the lines
