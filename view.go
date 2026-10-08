@@ -14,6 +14,10 @@ import (
 )
 
 func (w *window) view(c *ui.Context) {
+	for _, f := range w.files {
+		clear(f.previousSpans)
+		f.spans, f.previousSpans = f.previousSpans, f.spans
+	}
 	if debugFrames {
 		start := time.Now()
 		defer func() {

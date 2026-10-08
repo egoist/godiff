@@ -804,6 +804,7 @@ func (l *loaded) apply() {
 	f.loaded = true
 	f.metricsDone = false
 	f.spans = nil
+	f.previousSpans = nil
 }
 
 // maxImage is the size of the pictures shown.
