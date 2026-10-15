@@ -74,21 +74,38 @@ func TestNormalize(t *testing.T) {
 		{ID: 11, State: "COMMENTED", User: ada, Body: ""},
 		{ID: 12, State: "PENDING", NodeID: "PRR_x", User: ada},
 	}
-	pending := []reviewCommentJSON{{ID: 20, Path: "a.go", Side: Right, Line: intp(8), User: ada, Body: "Draft"}}
-	res := map[int64]resolution{1: {nodeID: "T_1", resolved: true}}
+	pending := []reviewCommentJSON{
+		{ID: 20, Path: "a.go", Side: Right, Line: intp(8), User: ada, Body: "Draft"},
+		// As GitHub gives a pending comment: no line, no side.
+		{ID: 21, Path: "c.yml", User: ada, Body: "On a deleted line"},
+		{ID: 22, Path: "c.yml", User: ada, Body: "Lines changed"},
+	}
+	res := map[int64]resolution{
+		1: {nodeID: "T_1", resolved: true},
+		// A submitted thread keeps REST's location over GraphQL's.
+		2:  {nodeID: "T_2", line: 7, originalLine: 1, side: Right},
+		21: {nodeID: "T_21", line: 124, originalLine: 124, startLine: 124, side: Left},
+		22: {nodeID: "T_22", originalLine: 5, side: Right, outdated: true},
+	}
 	r := normalize(comments, reviews, pending, res)
-	if len(r.Threads) != 3 {
+	if len(r.Threads) != 5 {
 		t.Fatalf("threads %+v", r.Threads)
 	}
 	first := r.Threads[0]
 	if first.RootID != 1 || len(first.Comments) != 2 || first.Comments[1].Body != "Agreed" || first.StartLine != 2 || !first.Resolved || first.NodeID != "T_1" {
 		t.Errorf("first thread %+v", first)
 	}
-	if !r.Threads[1].Outdated || r.Threads[1].OriginalLine != 9 || r.Threads[1].Side != Left {
+	if !r.Threads[1].Outdated || r.Threads[1].Line != 0 || r.Threads[1].OriginalLine != 9 || r.Threads[1].Side != Left {
 		t.Errorf("outdated thread %+v", r.Threads[1])
 	}
-	if !r.Threads[2].Pending || r.PendingComments() != 1 {
+	if !r.Threads[2].Pending || r.Threads[2].Line != 8 || r.PendingComments() != 3 {
 		t.Errorf("pending thread %+v", r.Threads[2])
+	}
+	if p := r.Threads[3]; !p.Pending || p.Outdated || p.Line != 124 || p.Side != Left || p.NodeID != "T_21" {
+		t.Errorf("pending thread without REST line %+v", p)
+	}
+	if p := r.Threads[4]; !p.Pending || !p.Outdated || p.Line != 0 || p.OriginalLine != 5 {
+		t.Errorf("outdated pending thread %+v", p)
 	}
 	if r.Pending == nil || r.Pending.ID != 12 || r.Pending.NodeID != "PRR_x" {
 		t.Errorf("pending review %+v", r.Pending)
@@ -124,10 +141,10 @@ func (f *fakeGitHub) serve(t *testing.T) *httptest.Server {
 		case r.URL.Path == "/repos/acme/app/pulls/1/reviews" && r.Method == http.MethodGet:
 			fmt.Fprint(w, `[{"id":7,"node_id":"PRR_7","state":"PENDING","user":{"login":"ada"}}]`)
 		case r.URL.Path == "/repos/acme/app/pulls/1/reviews/7/comments":
-			fmt.Fprint(w, `[{"id":5,"path":"b.go","side":"RIGHT","line":1,"user":{"login":"ada"},"body":"Draft"}]`)
+			fmt.Fprint(w, `[{"id":5,"path":"b.go","side":null,"line":null,"original_line":null,"start_line":null,"user":{"login":"ada"},"body":"Draft"}]`)
 		case r.URL.Path == "/graphql":
 			if strings.Contains(string(body), "reviewThreads") {
-				fmt.Fprint(w, `{"data":{"repository":{"pullRequest":{"reviewThreads":{"pageInfo":{"hasNextPage":false},"nodes":[{"id":"T1","isResolved":false,"comments":{"nodes":[{"fullDatabaseId":"1"}]}}]}}}}}`)
+				fmt.Fprint(w, `{"data":{"repository":{"pullRequest":{"reviewThreads":{"pageInfo":{"hasNextPage":false},"nodes":[{"id":"T1","isResolved":false,"isOutdated":false,"line":3,"originalLine":3,"startLine":null,"diffSide":"RIGHT","comments":{"nodes":[{"fullDatabaseId":"1"}]}},{"id":"T5","isResolved":false,"isOutdated":false,"line":12,"originalLine":12,"startLine":10,"diffSide":"LEFT","comments":{"nodes":[{"fullDatabaseId":"5"}]}}]}}}}}`)
 				return
 			}
 			if strings.Contains(string(body), "search(") {
@@ -171,6 +188,9 @@ func TestClient(t *testing.T) {
 	}
 	if len(r.Threads) != 2 || len(r.Threads[0].Comments) != 2 || r.Threads[0].NodeID != "T1" || !r.Threads[1].Pending || r.Pending == nil {
 		t.Fatalf("reviews %+v", r)
+	}
+	if p := r.Threads[1]; p.Line != 12 || p.StartLine != 10 || p.OriginalLine != 12 || p.Side != Left || p.Outdated {
+		t.Fatalf("pending thread %+v", p)
 	}
 
 	pulls, err := c.OpenPulls(ctx, repo)
