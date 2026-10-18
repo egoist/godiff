@@ -656,7 +656,12 @@ func (w *window) lineSpans(f *fileState, s lineSide, sd side, pal *palette, word
 	if spans, ok := f.spans[key]; ok {
 		return spans
 	}
-	spans := codeSpans(s.text, s.segs, marks, pal)
+	spans, ok := f.previousSpans[key]
+	if ok {
+		delete(f.previousSpans, key)
+	} else {
+		spans = codeSpans(s.text, s.segs, marks, pal)
+	}
 	if f.spans == nil {
 		f.spans = map[spanKey][]ui.Span{}
 	}
