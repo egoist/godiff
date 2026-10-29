@@ -182,6 +182,7 @@ func showWelcome(err error) {
 		TitleBarStyle: mygo.TitleBarHiddenInset,
 		Content:       ui.View(v.view),
 	})
+	v.win = welcomeWin
 }
 
 func closeWelcome() {
