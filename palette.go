@@ -1,6 +1,7 @@
 package main
 
 import (
+	"runtime"
 	"strings"
 
 	"github.com/egoist/godiff/internal/agent"
@@ -8,6 +9,13 @@ import (
 	"github.com/egoist/mygo"
 	"github.com/egoist/mygo/ui"
 )
+
+func shortcutLabel(keys string) string {
+	if runtime.GOOS == "darwin" {
+		return keys
+	}
+	return strings.NewReplacer("⌘", "Ctrl+", "⇧", "Shift+", "⌥", "Alt+", "↩", "Enter").Replace(keys)
+}
 
 // command is an action of the command bar.
 type command struct {
@@ -89,12 +97,12 @@ func (w *window) commands() []command {
 		{title: "Toggle Whitespace", hint: whitespace, run: func() {
 			cfg.Update(func(s *Settings) { s.ShowWhitespace = !s.ShowWhitespace })
 		}},
-		{title: "Increase Code Font Size", keys: "⌘+", run: func() { changeFontSize(1) }},
+		{title: "Increase Code Font Size", keys: "⌘=", run: func() { changeFontSize(1) }},
 		{title: "Decrease Code Font Size", keys: "⌘-", run: func() { changeFontSize(-1) }},
 		{title: "Reset Code Font Size", keys: "⌘0", run: func() { changeFontSize(0) }},
 		{title: "Open Config File", run: openConfig},
 		{title: "Refresh Changes", keys: "⌘R", run: w.refresh},
-		{title: "Keyboard Shortcuts", keys: "⇧?", run: func() { w.help = true }},
+		{title: "Keyboard Shortcuts", keys: "?", run: func() { w.help = true }},
 	}
 }
 
@@ -231,7 +239,7 @@ func (w *window) palette(c *ui.Context) {
 				}
 				ui.Spacer(c)
 				if cmd.keys != "" {
-					k := ui.Text(c, cmd.keys).FontSize(11).Padding(2, 6).Radius(5).Shrink(0)
+					k := ui.Text(c, shortcutLabel(cmd.keys)).FontSize(11).Padding(2, 6).Radius(5).Shrink(0)
 					if i == w.paletteRow {
 						k.Background(ui.RGBA(255, 255, 255, 0.2))
 					} else {
@@ -372,13 +380,15 @@ func (w *window) shortcutsHelp(c *ui.Context) {
 		title string
 		keys  [][2]string
 	}{
-		{"Navigation", [][2]string{{"Command bar", "⌘K"}, {"Filter files", "⌘P"}, {"Next hunk", "J"}, {"Previous hunk", "K"},
-			{"Next AI note", "N"}, {"Previous AI note", "⇧N"},
-			{"Toggle sidebar", "⌘⇧B"}, {"Toggle word wrap", "⌥Z"}, {"Open file in editor", "⌘⇧O"}, {"Refresh changes", "⌘R"}}},
+		{"File", [][2]string{{"Open folder", "⌘O"}, {"Open commit", "⌘⇧C"}, {"Commit changes", "⌘⇧↩"}, {"Open file in editor", "⌘⇧O"}, {"Open config", "⌘,"}, {"Close window", "⌘W"}}},
+		{"Navigation", [][2]string{{"Command bar", "⌘K"}, {"Command bar (alternate)", "⌘⇧P"}, {"Filter files", "⌘P"}, {"Files / History / Pull requests", "⌘1 / ⌘2 / ⌘3"}, {"Toggle sidebar", "⌘⇧B"}, {"Refresh changes", "⌘R"}, {"Keyboard shortcuts", "?"}}},
+		{"Review", [][2]string{{"Next / previous hunk", "J / K"}, {"Next / previous AI note", "N / ⇧N"}, {"Comment on hunk", "↩"}, {"Add comment or reply", "⌘↩"}, {"Discard comment", "Esc"}, {"Copy review comments", "⌘⇧M"}, {"Review with AI", "⌘⇧I"}}},
 		{"Search", [][2]string{{"Find in diffs", "⌘F"}, {"Next match", "↩"}, {"Previous match", "⇧↩"}, {"Close search", "Esc"}}},
-		{"Comments", [][2]string{{"Comment on a line", "Click"}, {"Comment on the hunk", "↩"}, {"Add comment", "⌘↩"}, {"Discard comment", "Esc"}}},
-		{"Pull requests", [][2]string{{"Pull requests", "⌘3"}, {"Review with AI", "⌘⇧I"}, {"Add to your review", "⌘↩"}, {"Reply", "⌘↩"}}},
-		{"Code", [][2]string{{"Bigger text", "⌘+"}, {"Smaller text", "⌘-"}, {"Actual size", "⌘0"}}},
+		{"View", [][2]string{{"Toggle word wrap", "⌥Z"}, {"Bigger text", "⌘="}, {"Smaller text", "⌘-"}, {"Actual size", "⌘0"}}},
+	}
+	if runtime.GOOS == "windows" {
+		groups[0].keys = append(groups[0].keys, [2]string{"Minimize window", "⌘M"}, [2]string{"Toggle full screen", "F11"})
+		groups[3].keys = append(groups[3].keys, [2]string{"Next / previous match", "F3 / ⇧F3"})
 	}
 	ui.Modal(c, &w.help, func() {
 		ui.Column(c).Width(620).Gap(16).Children(func() {
@@ -388,18 +398,20 @@ func (w *window) shortcutsHelp(c *ui.Context) {
 					w.help = false
 				}
 			})
-			ui.Grid(c).Columns(2).GapX(28).GapY(14).Children(func() {
-				for _, g := range groups {
-					ui.Column(c).Gap(4).Children(func() {
-						ui.Text(c, strings.ToUpper(g.title)).FontSize(11).FontWeight(600).LetterSpacing(0.6).TextColor(t.TextMuted)
-						for _, k := range g.keys {
-							ui.Row(c).MinHeight(26).Children(func() {
-								ui.Text(c, k[0]).FontSize(13).Grow(1)
-								ui.Text(c, k[1]).FontSize(11).Padding(2, 6).Radius(5).Background(paletteFor(t).pill)
-							})
-						}
-					})
-				}
+			ui.Scroll(c).MaxHeight(320).Children(func() {
+				ui.Grid(c).Columns(2).GapX(28).GapY(14).Children(func() {
+					for _, g := range groups {
+						ui.Column(c).Gap(4).Children(func() {
+							ui.Text(c, strings.ToUpper(g.title)).FontSize(11).FontWeight(600).LetterSpacing(0.6).TextColor(t.TextMuted)
+							for _, k := range g.keys {
+								ui.Row(c).MinHeight(26).Children(func() {
+									ui.Text(c, k[0]).FontSize(13).Grow(1)
+									ui.Text(c, shortcutLabel(k[1])).FontSize(11).Padding(2, 6).Radius(5).Background(paletteFor(t).pill)
+								})
+							}
+						})
+					}
+				})
 			})
 		})
 	})

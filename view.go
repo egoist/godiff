@@ -10,10 +10,12 @@ import (
 	"time"
 
 	"github.com/egoist/godiff/internal/git"
+	"github.com/egoist/mygo"
 	"github.com/egoist/mygo/ui"
 )
 
 func (w *window) view(c *ui.Context) {
+	menuShortcuts(c, w, func() *mygo.Window { return w.win }, openFolder)
 	if debugFrames {
 		start := time.Now()
 		defer func() {
@@ -413,9 +415,11 @@ func (w *window) shortcuts(c *ui.Context, reviewBuilt bool) {
 // welcome is the window shown without a repository.
 type welcome struct {
 	err error
+	win *mygo.Window
 }
 
 func (v *welcome) view(c *ui.Context) {
+	menuShortcuts(c, nil, func() *mygo.Window { return v.win }, openFolder)
 	t := c.Theme()
 	pal := paletteFor(t)
 	c.Root().Background(pal.appBg)
